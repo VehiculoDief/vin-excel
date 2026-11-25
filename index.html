@@ -62,7 +62,7 @@ dl.fields dt{color:var(--muted)} dl.fields dd{margin:0;word-break:break-word}
 .tabs{display:flex;gap:6px;margin:4px 0 10px;overflow-x:auto}
 .tabs button{flex:1;white-space:nowrap;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:9px 8px;font-size:14px;font-weight:600}
 .tabs button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
-input.filter{width:100%;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px 12px;margin-bottom:10px}
+input.filter,select.filter{width:100%;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px 12px;margin-bottom:10px}
 ul.list{list-style:none;margin:0;padding:0}
 ul.list li{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px}
 ul.list li .grow{flex:1;min-width:0}
@@ -96,6 +96,10 @@ ul.list li.late{border-left:6px solid var(--bad)}
 .times dt{color:var(--muted)} .times dd{margin:0;font-weight:700}
 /* Resumen por marca y modelo */
 select.filter{font-weight:700}
+.seg{display:flex;gap:6px;margin-bottom:10px}
+.seg button{flex:1;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px 6px;font-weight:700;font-size:14px}
+.seg button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+#summary input.t[type=date]{flex:1;min-width:0}
 .sum-card{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden}
 .sum-card summary{list-style:none;cursor:pointer;padding:12px;display:flex;align-items:center;gap:10px}
 .sum-card summary::-webkit-details-marker{display:none}
@@ -407,6 +411,7 @@ function headerScore(t){
 }
 
 /* Marca y modelo: se buscan por el nombre de la columna, sirva el formato que sea */
+function colorScore(h){ const u = normH(h); if(!u || u.length > 40 || /COD/.test(u)) return 0; return /^(COLOR|COLOUR)$/.test(u) ? 3 : /\bCOLOR\b|\bCOLOUR\b/.test(u) ? 2 : 0; }
 function brandScore(h){ const u = normH(h); if(!u || u.length > 30) return 0; return /^(MARCA|MAKE|BRAND|FABRICANTE)\b/.test(u) ? 2 : /\bMARCA\b/.test(u) ? 1 : 0; }
 function modelScore(h){
   const u = normH(h);
@@ -475,8 +480,8 @@ async function parseWorkbook(buf){
     const lastCol = Math.max(headers.length - 1, maxCol, 1);
     // columnas de marca y modelo (la de mejor coincidencia; nunca la del VIN ni las de la app)
     const pickCol = score => { let best = 0, col = 0; headers.forEach((h, c) => { if(c === vinCol || Object.values(track).includes(c)) return; const s = score(h); if(s > best){ best = s; col = c; } }); return col; };
-    const brandCol = pickCol(brandScore), modelCol = pickCol(modelScore);
-    const sh = { name: ws.name, ws, headers, headerRow: headerRow ? headerRow.rn : 0, vinCol, lastCol, markerCol, track, legacy, brandCol, modelCol };
+    const brandCol = pickCol(brandScore), modelCol = pickCol(modelScore), colorCol = pickCol(colorScore);
+    const sh = { name: ws.name, ws, headers, headerRow: headerRow ? headerRow.rn : 0, vinCol, lastCol, markerCol, track, legacy, brandCol, modelCol, colorCol };
     let n = 0;
     for(const r of rows){
       if(headerRow && r.rn <= headerRow.rn) continue;
@@ -497,6 +502,7 @@ async function parseWorkbook(buf){
         found, exited, ingresoAt, salidaAt, opIn, opOut,
         brand: ((brandCol && r.vals[brandCol]) || brandFromVin(v) || 'SIN MARCA').trim().toUpperCase().replace(/\s+/g, ' '),
         model: ((modelCol && r.vals[modelCol]) || 'SIN MODELO').trim().toUpperCase().replace(/\s+/g, ' '),
+        color: ((colorCol && r.vals[colorCol]) || 'SIN COLOR').trim().toUpperCase().replace(/\s+/g, ' '),
         wasFound: found, wasExited: exited });
       n++;
     }
@@ -828,35 +834,71 @@ function saveBlob(blob, name){ const a = document.createElement('a'); a.href = U
 function exportCsv(){
   const q = v => '"' + String(v ?? '').replace(/"/g,'""') + '"';
   const hhmm = d => d ? d.toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit', hour12:false }) : '';
-  const lines = [['Manifiesto','VIN','Marca','Modelo','Estado','Fecha ingreso','Hora ingreso','Operario ingreso','Fecha salida','Hora salida','Operario salida','Días custodia','Vence','Vencido','Hoja','Fila','Detalle'].map(q).join(';')];
-  for(const e of S.entries.filter(inView)) lines.push([shortName(e.fileName), e.vin, e.brand, e.model, e.exited ? 'SALIÓ' : e.found ? 'EN ALMACÉN' : 'POR LLEGAR',
+  const lines = [['Manifiesto','VIN','Marca','Modelo','Color','Estado','Fecha ingreso','Hora ingreso','Operario ingreso','Fecha salida','Hora salida','Operario salida','Días custodia','Vence','Vencido','Hoja','Fila','Detalle'].map(q).join(';')];
+  for(const e of S.entries.filter(inView)) lines.push([shortName(e.fileName), e.vin, e.brand, e.model, e.color, e.exited ? 'SALIÓ' : e.found ? 'EN ALMACÉN' : 'POR LLEGAR',
     e.ingresoAt ? fmtD(e.ingresoAt) : '', hhmm(e.ingresoAt), e.opIn || '',
     e.salidaAt ? fmtD(e.salidaAt) : '', hhmm(e.salidaAt), e.opOut || '',
     custody(e) ?? '', dueDate(e) ? fmtD(dueDate(e)) : '', isLate(e) ? 'SÍ' : '', e.sheet, e.row, rowSummary(e)].map(q).join(';'));
-  for(const x of S.extras) lines.push(['', x.vin, '', '', 'NO EN MANIFIESTO', x.at, '', x.src, '', '', '', '', '', '', '', '', ''].map(q).join(';'));
+  for(const x of S.extras) lines.push(['', x.vin, '', '', '', 'NO EN MANIFIESTO', x.at, '', x.src, '', '', '', '', '', '', '', '', ''].map(q).join(';'));
   saveBlob(new Blob(['﻿' + lines.join('\r\n')], { type:'text/csv;charset=utf-8' }), 'Reporte VIN ' + new Date().toISOString().slice(0, 10) + '.csv');
 }
-/* resumen por marca y modelo (de los manifiestos que se están viendo) */
-function summaryData(){
-  const brands = new Map();
-  for(const e of S.entries.filter(inView)){
-    const st = e.exited ? 'out' : e.found ? 'in' : 'pend';
-    if(!brands.has(e.brand)) brands.set(e.brand, { name: e.brand, tot: 0, pend: 0, in: 0, out: 0, late: 0, models: new Map() });
-    const b = brands.get(e.brand);
-    if(!b.models.has(e.model)) b.models.set(e.model, { name: e.model, tot: 0, pend: 0, in: 0, out: 0, late: 0 });
-    for(const g of [b, b.models.get(e.model)]){ g.tot++; g[st]++; if(isLate(e)) g.late++; }
+/* ---- Resumen: INGRESOS o SALIDAS de un período, o ESTADO actual; por marca › modelo › color ---- */
+S.sum = Object.assign({ view: 'in', period: 'today', from: '', to: '', byColor: true }, store.get('vin_sum', {}));
+const PERIODS = { today: 'Hoy', yday: 'Ayer', d7: 'Últimos 7 días', month: 'Este mes', all: 'Todo', range: 'Rango de fechas' };
+function periodRange(){
+  const t0 = dayOnly(new Date()), add = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  switch(S.sum.period){
+    case 'today': return [t0, add(t0, 1)];
+    case 'yday':  return [add(t0, -1), t0];
+    case 'd7':    return [add(t0, -6), add(t0, 1)];
+    case 'month': return [new Date(t0.getFullYear(), t0.getMonth(), 1), add(t0, 1)];
+    case 'range': { const p = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+      return [S.sum.from ? p(S.sum.from) : null, S.sum.to ? add(p(S.sum.to), 1) : null]; }
+    default: return [null, null];
   }
-  const sortG = m => [...m.values()].sort((a, b) => b.tot - a.tot || a.name.localeCompare(b.name));
-  return sortG(brands).map(b => ({ ...b, models: sortG(b.models) }));
 }
+function periodLabel(){
+  if(S.sum.period !== 'range') return PERIODS[S.sum.period];
+  const f = s => s ? s.split('-').reverse().join('/') : '…';
+  return `del ${f(S.sum.from)} al ${f(S.sum.to)}`;
+}
+function sumEntries(){
+  const V = S.entries.filter(inView);
+  if(S.sum.view === 'cur') return V;
+  const [a, b] = periodRange();
+  return V.filter(e => { const d = S.sum.view === 'in' ? e.ingresoAt : e.salidaAt; return d && (!a || d >= a) && (!b || d < b); });
+}
+function summaryData(){
+  const mk = name => ({ name, tot: 0, pend: 0, in: 0, out: 0, late: 0, dSum: 0, dN: 0, kids: new Map() });
+  const root = mk('');
+  for(const e of sumEntries()){
+    const st = e.exited ? 'out' : e.found ? 'in' : 'pend';
+    const b = root.kids.get(e.brand) || root.kids.set(e.brand, mk(e.brand)).get(e.brand);
+    const m = b.kids.get(e.model) || b.kids.set(e.model, mk(e.model)).get(e.model);
+    const c = m.kids.get(e.color) || m.kids.set(e.color, mk(e.color)).get(e.color);
+    const d = e.exited ? custody(e) : null;
+    for(const g of [root, b, m, c]){ g.tot++; g[st]++; if(isLate(e)) g.late++; if(d != null){ g.dSum += d; g.dN++; } }
+  }
+  const sortT = n => { n.list = [...n.kids.values()].sort((x, y) => y.tot - x.tot || x.name.localeCompare(y.name)); n.list.forEach(sortT); return n; };
+  return sortT(root);
+}
+const avgDays = g => g.dN ? (g.dSum / g.dN).toFixed(1) : '—';
 function exportSummaryCsv(){
   const q = v => '"' + String(v ?? '').replace(/"/g,'""') + '"';
-  const lines = [['Marca','Modelo','Total','Por llegar','En almacén','Salieron','Recibidos','Vencidos'].map(q).join(';')];
-  for(const b of summaryData()){
-    for(const m of b.models) lines.push([b.name, m.name, m.tot, m.pend, m.in, m.out, m.in + m.out, m.late].map(q).join(';'));
-    lines.push([b.name, 'TOTAL ' + b.name, b.tot, b.pend, b.in, b.out, b.in + b.out, b.late].map(q).join(';'));
+  const R = summaryData(), v = S.sum.view;
+  const cols = v === 'cur' ? ['Total','Por llegar','En almacén','Salieron','Vencidos'] : v === 'in' ? ['Ingresos','Siguen en almacén','Ya salieron'] : ['Salidas','Días promedio custodia'];
+  const vals = g => v === 'cur' ? [g.tot, g.pend, g.in, g.out, g.late] : v === 'in' ? [g.tot, g.in, g.out] : [g.tot, avgDays(g)];
+  const title = v === 'cur' ? 'Estado actual' : (v === 'in' ? 'Ingresos ' : 'Salidas ') + periodLabel();
+  const lines = [q('Resumen: ' + title), ['Marca','Modelo','Color', ...cols].map(q).join(';')];
+  for(const b of R.list){
+    for(const m of b.list){
+      if(S.sum.byColor) for(const c of m.list) lines.push([b.name, m.name, c.name, ...vals(c)].map(q).join(';'));
+      else lines.push([b.name, m.name, '', ...vals(m)].map(q).join(';'));
+    }
+    lines.push([b.name, 'TOTAL ' + b.name, '', ...vals(b)].map(q).join(';'));
   }
-  saveBlob(new Blob(['﻿' + lines.join('\r\n')], { type:'text/csv;charset=utf-8' }), 'Resumen marca-modelo ' + new Date().toISOString().slice(0, 10) + '.csv');
+  lines.push(['TOTAL GENERAL', '', '', ...vals(R)].map(q).join(';'));
+  saveBlob(new Blob(['﻿' + lines.join('\r\n')], { type:'text/csv;charset=utf-8' }), `Resumen ${title.replace(/[\/:]/g, '-')} ${new Date().toISOString().slice(0, 10)}.csv`);
 }
 
 /* =====================================================================
@@ -1063,7 +1105,7 @@ function renderList(){
     if(S.tab === 'in') items.sort((a, b) => (isLate(b) - isLate(a)) || ((a.ingresoAt || 0) - (b.ingresoAt || 0)));   // vencidos y más antiguos primero
     if(S.tab === 'out') items.sort((a, b) => (b.salidaAt || 0) - (a.salidaAt || 0));
     html = items.slice(0, LIMIT).map(e => {
-      let cls = '', meta = esc(e.brand + ' · ' + e.model) + (many ? ' · 📄 ' + esc(shortName(e.fileName)) : ''), badge = `<span class="badge">F${e.row}</span>`;
+      let cls = '', meta = esc(e.brand + ' · ' + e.model + ' · ' + e.color) + (many ? ' · 📄 ' + esc(shortName(e.fileName)) : ''), badge = `<span class="badge">F${e.row}</span>`;
       if(e.exited){ cls = 'exited'; meta = `Salió ${shortDT(e.salidaAt) || '—'} · ${custody(e) ?? '—'} día(s) · ${meta}`; badge = `<span class="badge out">${custody(e) ?? '—'} d</span>`; }
       else if(e.found){
         const d = custody(e), late = isLate(e);
@@ -1080,23 +1122,58 @@ function renderList(){
 }
 
 /* pestaña Resumen: vehículos por marca y modelo */
-function renderSummary(ql){
-  const data = summaryData().filter(b => !ql || b.name.toLowerCase().includes(ql) || b.models.some(m => m.name.toLowerCase().includes(ql)));
-  const T = data.reduce((a, b) => { for(const k of ['tot','pend','in','out','late']) a[k] += b[k]; return a; }, { tot:0, pend:0, in:0, out:0, late:0 });
-  const pct = (a, t) => t ? (a / t * 100).toFixed(1) + '%' : '0';
-  const row = (g, bold) => `<tr${bold ? ' style="font-weight:800"' : ''}><td>${esc(g.name)}</td><td>${g.tot}</td><td>${g.pend}</td><td class="n-in">${g.in}</td><td class="n-out">${g.out}</td>${+cfg.custodyDays ? `<td class="${g.late ? 'n-late' : ''}">${g.late}</td>` : ''}</tr>`;
-  const head = `<thead><tr><th>Modelo</th><th>Total</th><th>Por llegar</th><th>En alm.</th><th>Salieron</th>${+cfg.custodyDays ? '<th>Venc.</th>' : ''}</tr></thead>`;
-  const scope = S.filter === 'all' ? (S.files.length > 1 ? `${S.files.length} manifiestos` : shortName(S.files[0]?.name)) : shortName(S.fileMap[S.filter]?.name);
-  $('#summary').innerHTML = `
-    <div class="sum-total"><div><b>${T.in + T.out} de ${T.tot}</b> recibidos <span class="muted">· ${esc(scope || '')}</span></div>
-      <button class="btn sm" data-act="sumcsv">⬇ CSV</button></div>
-    ${data.map((b, i) => `<details class="sum-card"${i < 3 || ql ? ' open' : ''}>
-      <summary><span class="grow">${esc(b.name)} <span class="muted">· ${b.models.length} modelo(s)</span></span>
-        <span class="badge ok">${b.in + b.out}/${b.tot}</span></summary>
-      <div class="mini" style="margin:0 12px"><i class="a" style="width:${pct(b.out, b.tot)}"></i><i class="b" style="width:${pct(b.in, b.tot)}"></i></div>
-      <div style="overflow-x:auto"><table class="sum">${head}<tbody>${b.models.map(m => row(m)).join('')}${b.models.length > 1 ? row({ ...b, name: 'Total ' + b.name }, true) : ''}</tbody></table></div>
-    </details>`).join('') || '<p class="muted">Sin datos.</p>'}`;
+/* muestra de color para los nombres más comunes */
+function swatch(name){
+  const u = normH(name);
+  const C = [[/BLANC|WHITE|PERLA BLANC/, '#f4f4f4'], [/NEGR|BLACK|EBANO/, '#1a1a1a'], [/PLATA|PLATEAD|SILVER/, '#c0c4c8'], [/GRIS|GRAY|GREY|TITANIO|GRAFITO/, '#7d8288'],
+    [/ROJ|RED|GRANATE|VINO|GUINDA/, '#c0262d'], [/AZUL|BLUE|MARINO/, '#2f5fb3'], [/CELESTE|TURQU|CYAN/, '#4fb3d9'], [/VERDE|GREEN|OLIVA/, '#2f8f4e'],
+    [/AMARILL|YELLOW|DORAD|GOLD/, '#e6b800'], [/NARANJ|ORANGE/, '#e8731a'], [/MARRON|CAFE|BROWN|BRONCE|COBRE/, '#7a4a2a'], [/BEIGE|ARENA|CHAMPA|CREMA/, '#d9c7a1'], [/MORAD|VIOLET|PURP|LILA/, '#7b4fa3']];
+  for(const [re, col] of C) if(re.test(u)) return `<i style="display:inline-block;width:11px;height:11px;border-radius:50%;background:${col};border:1px solid rgba(128,128,128,.6);margin-right:6px;vertical-align:-1px"></i>`;
+  return '';
 }
+function renderSummary(ql){
+  const R = summaryData(), v = S.sum.view;
+  // filtro de texto: deja solo las ramas (marca, modelo o color) que coinciden
+  if(ql){
+    const hit = n => n.name.toLowerCase().includes(ql);
+    R.list = R.list.map(b => hit(b) ? b : { ...b, list: b.list.map(m => hit(m) ? m : { ...m, list: m.list.filter(hit) }).filter(m => hit(m) || m.list.length) })
+      .filter(b => hit(b) || b.list.length);
+  }
+  const pct = (a, t) => t ? (a / t * 100).toFixed(1) + '%' : '0';
+  const late = +cfg.custodyDays > 0;
+  const head = v === 'cur' ? `<th>Total</th><th>Por llegar</th><th>En alm.</th><th>Salieron</th>${late ? '<th>Venc.</th>' : ''}`
+             : v === 'in'  ? `<th>Ingresos</th><th>En alm.</th><th>Salieron</th>`
+             :               `<th>Salidas</th><th>Días prom.</th>`;
+  const cells = g => v === 'cur' ? `<td>${g.tot}</td><td>${g.pend}</td><td class="n-in">${g.in}</td><td class="n-out">${g.out}</td>${late ? `<td class="${g.late ? 'n-late' : ''}">${g.late}</td>` : ''}`
+             : v === 'in'  ? `<td><b>${g.tot}</b></td><td class="n-in">${g.in}</td><td class="n-out">${g.out}</td>`
+             :               `<td><b>${g.tot}</b></td><td>${avgDays(g)}</td>`;
+  const rows = b => b.list.map(m => `<tr${S.sum.byColor ? ' style="background:rgba(127,127,127,.07)"' : ''}><td><b>${esc(m.name)}</b></td>${cells(m)}</tr>` +
+      (S.sum.byColor ? m.list.map(c => `<tr><td style="padding-left:22px">${swatch(c.name)}${esc(c.name)}</td>${cells(c)}</tr>`).join('') : '')).join('') +
+      (b.list.length > 1 ? `<tr style="font-weight:800"><td>Total ${esc(b.name)}</td>${cells(b)}</tr>` : '');
+  const T = R.list.reduce((a, b) => { for(const k of ['tot','pend','in','out','late','dSum','dN']) a[k] += b[k]; return a; }, { tot:0, pend:0, in:0, out:0, late:0, dSum:0, dN:0 });
+  const scope = S.filter === 'all' ? (S.files.length > 1 ? `${S.files.length} manifiestos` : shortName(S.files[0]?.name)) : shortName(S.fileMap[S.filter]?.name);
+  const total = v === 'cur' ? `<b>${T.in + T.out} de ${T.tot}</b> recibidos`
+              : v === 'in'  ? `<b>${T.tot}</b> ingreso(s) · ${esc(periodLabel())}`
+              :               `<b>${T.tot}</b> salida(s) · ${esc(periodLabel())}${T.dN ? ` · prom. ${avgDays(T)} días` : ''}`;
+  const seg = (k, l) => `<button data-sv="${k}" class="${v === k ? 'on' : ''}">${l}</button>`;
+  $('#summary').innerHTML = `
+    <div class="seg">${seg('in', '⬇ Ingresos')}${seg('out', '⬆ Salidas')}${seg('cur', '📦 Estado')}</div>
+    <div class="row" style="gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      ${v === 'cur' ? '' : `<select id="sumPeriod" class="filter" style="flex:1;min-width:150px;margin:0">${Object.entries(PERIODS).map(([k, l]) => `<option value="${k}"${S.sum.period === k ? ' selected' : ''}>${l}</option>`).join('')}</select>`}
+      <label class="row" style="gap:6px;font-size:14px;white-space:nowrap"><input type="checkbox" id="sumColor" ${S.sum.byColor ? 'checked' : ''}> Por color</label>
+    </div>
+    ${v !== 'cur' && S.sum.period === 'range' ? `<div class="row" style="gap:8px;margin-bottom:10px">
+      <input type="date" id="sumFrom" class="t" value="${esc(S.sum.from)}"><span class="muted">a</span><input type="date" id="sumTo" class="t" value="${esc(S.sum.to)}"></div>` : ''}
+    <div class="sum-total"><div>${total} <span class="muted">· ${esc(scope || '')}</span></div>
+      <button class="btn sm" data-act="sumcsv">⬇ CSV</button></div>
+    ${R.list.map((b, i) => `<details class="sum-card"${i < 4 || ql ? ' open' : ''}>
+      <summary><span class="grow">${esc(b.name)} <span class="muted">· ${b.list.length} modelo(s)</span></span>
+        <span class="badge ${v === 'out' ? 'out' : 'ok'}">${v === 'cur' ? (b.in + b.out) + '/' + b.tot : b.tot}</span></summary>
+      ${v === 'cur' ? `<div class="mini" style="margin:0 12px"><i class="a" style="width:${pct(b.out, b.tot)}"></i><i class="b" style="width:${pct(b.in, b.tot)}"></i></div>` : ''}
+      <div style="overflow-x:auto"><table class="sum"><thead><tr><th>${S.sum.byColor ? 'Modelo / color' : 'Modelo'}</th>${head}</tr></thead><tbody>${rows(b)}</tbody></table></div>
+    </details>`).join('') || `<p class="muted">${v === 'cur' ? 'Sin datos.' : `No hay ${v === 'in' ? 'ingresos' : 'salidas'} en este período.`}</p>`}`;
+}
+function setSum(p){ Object.assign(S.sum, p); store.set('vin_sum', S.sum); renderList(); }
 
 function vinDiffHtml(read, real){ return [...real].map((c, i) => read[i] === c ? esc(c) : `<b class="diff">${esc(c)}</b>`).join(''); }
 function renderResult(r){
@@ -1419,6 +1496,15 @@ $('#scTorch').onclick = () => Scan.torch();
 $('#manual').onsubmit = ev => { ev.preventDefault(); const v = $('#q').value; if(normVin(v).length < 4) return toast('Escribe al menos 4 caracteres'); handleRead(v, 'manual'); $('#q').select(); };
 $('#filter').oninput = () => renderList();
 $('#fileFilter').onchange = ev => { S.filter = ev.target.value; $('#result').classList.add('hidden'); renderAll(); };
+// controles del resumen
+$('#summary').addEventListener('click', ev => { const b = ev.target.closest('[data-sv]'); if(b) setSum({ view: b.dataset.sv }); });
+$('#summary').addEventListener('change', ev => {
+  const id = ev.target.id;
+  if(id === 'sumPeriod') setSum({ period: ev.target.value });
+  else if(id === 'sumColor') setSum({ byColor: ev.target.checked });
+  else if(id === 'sumFrom') setSum({ from: ev.target.value });
+  else if(id === 'sumTo') setSum({ to: ev.target.value });
+});
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b)); renderList(); });
 $('#list').onclick = ev => { const li = ev.target.closest('li[data-id]'); if(li){ const e = S.entries.find(x => x.id === li.dataset.id); if(e) openDetail(e); } };
 $('#fileChip').onclick = () => openFiles();
