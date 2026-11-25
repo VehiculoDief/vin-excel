@@ -265,8 +265,32 @@ function normVin(s){ return String(s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, 
 function nowTxt(d = new Date()){ return d.toLocaleString('es-PE', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }
 
 /* ---- Fechas de ingreso / salida (se guardan en el Excel como fecha real) ---- */
-const TRACK = [['in','INGRESO'], ['out','SALIDA'], ['days','DÍAS CUSTODIA'], ['op','OPERARIO']];
+// columnas que la app agrega al final del manifiesto (en este orden)
+const TRACK = [
+  ['inD',  'FECHA INGRESO'], ['inT',  'HORA INGRESO'], ['opIn',  'OPERARIO INGRESO'],
+  ['outD', 'FECHA SALIDA'],  ['outT', 'HORA SALIDA'],  ['opOut', 'OPERARIO SALIDA'],
+  ['days', 'DÍAS CUSTODIA']
+];
+const FMTS = { inD:'dd/mm/yyyy', inT:'hh:mm', opIn:'@', outD:'dd/mm/yyyy', outT:'hh:mm', opOut:'@', days:'0' };
 const DT_FMT = 'dd/mm/yyyy hh:mm';
+// lee una hora de Excel (fracción del día) y devuelve minutos desde medianoche
+function cellMinutes(c){
+  let v = c.value;
+  if(v && typeof v === 'object' && !(v instanceof Date) && 'result' in v) v = v.result;
+  let n = null;
+  if(v instanceof Date) n = v.getTime() / 864e5 + 25569;
+  else if(typeof v === 'number') n = v;
+  else if(typeof v === 'string'){ const m = v.match(/(\d{1,2}):(\d{2})/); if(m) return (+m[1]) * 60 + (+m[2]); }
+  if(n == null) return null;
+  return Math.round((n - Math.floor(n)) * 1440);
+}
+// junta la columna de fecha y la de hora en una sola fecha
+function joinDT(dCell, tCell){
+  const d = cellDate(dCell); if(!d) return null;
+  const mins = tCell ? cellMinutes(tCell) : null;
+  if(mins != null) d.setHours(Math.floor(mins / 60), mins % 60, 0, 0);
+  return d;
+}
 // número de serie de Excel con la hora local tal cual (sin desfase de zona horaria)
 function toSerial(d){ return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()) / 864e5 + 25569; }
 function fromSerial(n){ const u = new Date(Math.round((n - 25569) * 864e5)); return new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate(), u.getUTCHours(), u.getUTCMinutes(), u.getUTCSeconds()); }
@@ -394,14 +418,16 @@ async function parseWorkbook(buf){
     }
     const headers = headerRow ? headerRow.vals : [];
     let markerCol = 0;
-    const track = {};
+    const track = {}, legacy = {};
     headers.forEach((h, c) => {
       const u = normH(h);
       if(u === MARK_HEADER) markerCol = c;
       for(const [k, name] of TRACK) if(u === normH(name) || (k === 'days' && /^DIAS\b/.test(u))) track[k] = c;
+      // versión anterior de la app (fecha y hora juntas)
+      if(u === 'INGRESO') legacy.in = c; if(u === 'SALIDA') legacy.out = c; if(u === 'OPERARIO') legacy.op = c;
     });
     const lastCol = Math.max(headers.length - 1, maxCol, 1);
-    const sh = { name: ws.name, ws, headers, headerRow: headerRow ? headerRow.rn : 0, vinCol, lastCol, markerCol, track };
+    const sh = { name: ws.name, ws, headers, headerRow: headerRow ? headerRow.rn : 0, vinCol, lastCol, markerCol, track, legacy };
     let n = 0;
     for(const r of rows){
       if(headerRow && r.rn <= headerRow.rn) continue;
@@ -411,12 +437,15 @@ async function parseWorkbook(buf){
       if(v.length < 6 || !/\d/.test(v)) continue;
       const mk = markerCol ? (r.vals[markerCol] || '') : '';
       const fill = fillHex(r.row.getCell(vinCol));
-      const ingresoAt = track.in ? cellDate(r.row.getCell(track.in)) : null;
-      const salidaAt = track.out ? cellDate(r.row.getCell(track.out)) : null;
+      const cell = c => c ? r.row.getCell(c) : null;
+      const ingresoAt = track.inD ? joinDT(cell(track.inD), cell(track.inT)) : (legacy.in ? cellDate(cell(legacy.in)) : null);
+      const salidaAt = track.outD ? joinDT(cell(track.outD), cell(track.outT)) : (legacy.out ? cellDate(cell(legacy.out)) : null);
       const found = !!ingresoAt || !!salidaAt || fill === hex || fill === hexOut || /^ESCANEAD/i.test(mk);
       const exited = !!salidaAt || fill === hexOut;
+      let opIn = track.opIn ? (r.vals[track.opIn] || '') : '', opOut = track.opOut ? (r.vals[track.opOut] || '') : '';
+      if(!track.opIn && legacy.op){ const o = r.vals[legacy.op] || ''; opIn = (o.match(/Ing:\s*([^·]+)/) || [,''])[1].trim(); opOut = (o.match(/Sal:\s*(.+)$/) || [,''])[1].trim(); }
       entries.push({ id: ws.name + '!' + r.rn, vin: v, sheet: ws.name, row: r.rn, vals: r.vals,
-        found, exited, ingresoAt, salidaAt, opTxt: track.op ? (r.vals[track.op] || '') : '',
+        found, exited, ingresoAt, salidaAt, opIn, opOut,
         wasFound: found, wasExited: exited });
       n++;
     }
@@ -438,15 +467,18 @@ function setData({wb, sheets, entries}){
   }
 }
 /* estado de un vehículo, para la cola sin conexión y el modo teléfono */
-function stateOf(e){ return { f: e.found, x: e.exited, i: e.ingresoAt ? +e.ingresoAt : 0, s: e.salidaAt ? +e.salidaAt : 0, o: e.opTxt || '' }; }
-function applyState(e, st){ e.found = !!st.f; e.exited = !!st.x; e.ingresoAt = st.i ? new Date(st.i) : null; e.salidaAt = st.s ? new Date(st.s) : null; e.opTxt = st.o || ''; }
+function stateOf(e){ return { f: e.found, x: e.exited, i: e.ingresoAt ? +e.ingresoAt : 0, s: e.salidaAt ? +e.salidaAt : 0, oi: e.opIn || '', oo: e.opOut || '' }; }
+function applyState(e, st){
+  e.found = !!st.f; e.exited = !!st.x; e.ingresoAt = st.i ? new Date(st.i) : null; e.salidaAt = st.s ? new Date(st.s) : null;
+  e.opIn = st.oi ?? (st.o || ''); e.opOut = st.oo || '';
+}
 
 /* Resumen de una fila: campos útiles para mostrar */
 function rowFields(e, max = 99){
   const sh = S.sheets[e.sheet]; const out = [];
   const pref = /MARCA|MODELO|COLOR|DESCRIP|BL\b|B\/L|CONSIGN|CLIENTE|A[NÑ]O|UBIC|ZONA|DESTINO/i;
   const cols = [];
-  const skip = new Set([sh.vinCol, sh.markerCol, ...Object.values(sh.track || {})]);
+  const skip = new Set([sh.vinCol, sh.markerCol, ...Object.values(sh.track || {}), ...Object.values(sh.legacy || {})]);
   e.vals.forEach((v, c) => { if(v && !skip.has(c)) cols.push(c); });
   cols.sort((a, b) => (pref.test(sh.headers[b]||'') ? 1 : 0) - (pref.test(sh.headers[a]||'') ? 1 : 0));
   for(const c of cols.slice(0, max)) out.push([sh.headers[c] || ('Col ' + colLetter(c)), e.vals[c]]);
@@ -599,20 +631,22 @@ async function applyOp(op){
   const ws = `/drives/${op.driveId}/items/${op.itemId}/workbook/worksheets('${encodeURIComponent(op.sheet.replace(/'/g,"''"))}')`;
   const rng = a => `${ws}/range(address='${a}')`;
   const addr = `A${op.row}:${colLetter(op.lastCol)}${op.row}`;
-  if(op.v === 2){
+  if(op.v === 2) return;   // formato de una versión anterior de la app: se descarta
+  if(op.v === 3){
     const t = op.track, keys = TRACK.map(x => x[0]);
+    const first = keys[0], last = keys[keys.length - 1];
+    const contiguous = keys.every((k, i) => t[k] === t[first] + i);
+    const span = r => `${colLetter(t[first])}${r}:${colLetter(t[last])}${r}`;
     if(op.header && op.headerRow){
-      for(const [k, name] of TRACK) await gfetch(rng(colLetter(t[k]) + op.headerRow), { method:'PATCH', json:{ values:[[name]] } });
+      if(contiguous) await gfetch(rng(span(op.headerRow)), { method:'PATCH', json:{ values:[TRACK.map(x => x[1])] } });
+      else for(const [k, name] of TRACK) await gfetch(rng(colLetter(t[k]) + op.headerRow), { method:'PATCH', json:{ values:[[name]] } });
     }
     if(op.fill) await gfetch(rng(addr) + '/format/fill', { method:'PATCH', json:{ color: op.fill } });
     else await gfetch(rng(addr) + '/format/fill/clear', { method:'POST' });
-    const fmts = { in: DT_FMT, out: DT_FMT, days: '0', op: '@' };
-    const contiguous = keys.every((k, i) => t[k] === t.in + i);
     if(contiguous){
-      await gfetch(rng(`${colLetter(t.in)}${op.row}:${colLetter(t.op)}${op.row}`), { method:'PATCH',
-        json:{ numberFormat:[keys.map(k => fmts[k])], formulas:[keys.map(k => op.cells[k])] } });
+      await gfetch(rng(span(op.row)), { method:'PATCH', json:{ numberFormat:[keys.map(k => FMTS[k])], formulas:[keys.map(k => op.cells[k])] } });
     } else {
-      for(const k of keys) await gfetch(rng(colLetter(t[k]) + op.row), { method:'PATCH', json:{ numberFormat:[[fmts[k]]], formulas:[[op.cells[k]]] } });
+      for(const k of keys) await gfetch(rng(colLetter(t[k]) + op.row), { method:'PATCH', json:{ numberFormat:[[FMTS[k]]], formulas:[[op.cells[k]]] } });
     }
     return;
   }
@@ -679,7 +713,6 @@ function saveLocal(){
 }
 async function downloadMarked(){
   const argb = h => 'FF' + h.replace('#','').toUpperCase();
-  const toXl = d => new Date((toSerial(d) - 25569) * 864e5);   // ExcelJS guarda la fecha como UTC
   for(const e of S.entries){
     if(!e.found && !e.wasFound) continue;
     const sh = S.sheets[e.sheet]; const row = sh.ws.getRow(e.row);
@@ -689,13 +722,14 @@ async function downloadMarked(){
     }
     const fill = !e.found ? { type:'pattern', pattern:'none' } : { type:'pattern', pattern:'solid', fgColor:{ argb: argb(e.exited ? cfg.colorOut : cfg.color) } };
     for(let c = 1; c <= sh.lastCol; c++) row.getCell(c).fill = fill;
-    if(sh.track.in){
-      const t = sh.track, cells = trackCells(e, t);
-      const ci = row.getCell(t.in), co = row.getCell(t.out), cd = row.getCell(t.days), cp = row.getCell(t.op);
-      ci.value = e.ingresoAt ? toXl(e.ingresoAt) : null; ci.numFmt = DT_FMT;
-      co.value = e.salidaAt ? toXl(e.salidaAt) : null; co.numFmt = DT_FMT;
-      cd.value = cells.days ? { formula: cells.days.slice(1), result: custody(e) } : null; cd.numFmt = '0';
-      cp.value = e.opTxt || null;
+    if(sh.track.inD){
+      const cells = trackCells(e, sh.track);
+      for(const [k] of TRACK){
+        const c = row.getCell(sh.track[k]), v = cells[k];
+        if(k === 'days') c.value = v ? { formula: v.slice(1), result: custody(e) } : null;
+        else c.value = v === '' ? null : v;
+        c.numFmt = FMTS[k] === '@' ? 'General' : FMTS[k];
+      }
     }
   }
   S.wb.calcProperties = Object.assign(S.wb.calcProperties || {}, { fullCalcOnLoad: true });
@@ -705,11 +739,13 @@ async function downloadMarked(){
 function saveBlob(blob, name){ const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500); }
 function exportCsv(){
   const q = v => '"' + String(v ?? '').replace(/"/g,'""') + '"';
-  const lines = [['VIN','Estado','Ingreso','Salida','Días custodia','Vence','Vencido','Operario','Hoja','Fila','Detalle'].map(q).join(';')];
+  const hhmm = d => d ? d.toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit', hour12:false }) : '';
+  const lines = [['VIN','Estado','Fecha ingreso','Hora ingreso','Operario ingreso','Fecha salida','Hora salida','Operario salida','Días custodia','Vence','Vencido','Hoja','Fila','Detalle'].map(q).join(';')];
   for(const e of S.entries) lines.push([e.vin, e.exited ? 'SALIÓ' : e.found ? 'EN ALMACÉN' : 'POR LLEGAR',
-    e.ingresoAt ? fmtDT(e.ingresoAt) : '', e.salidaAt ? fmtDT(e.salidaAt) : '', custody(e) ?? '', dueDate(e) ? fmtD(dueDate(e)) : '',
-    isLate(e) ? 'SÍ' : '', e.opTxt || '', e.sheet, e.row, rowSummary(e)].map(q).join(';'));
-  for(const x of S.extras) lines.push([x.vin, 'NO EN MANIFIESTO', x.at, '', '', '', '', x.src, '', '', ''].map(q).join(';'));
+    e.ingresoAt ? fmtD(e.ingresoAt) : '', hhmm(e.ingresoAt), e.opIn || '',
+    e.salidaAt ? fmtD(e.salidaAt) : '', hhmm(e.salidaAt), e.opOut || '',
+    custody(e) ?? '', dueDate(e) ? fmtD(dueDate(e)) : '', isLate(e) ? 'SÍ' : '', e.sheet, e.row, rowSummary(e)].map(q).join(';'));
+  for(const x of S.extras) lines.push([x.vin, 'NO EN MANIFIESTO', x.at, '', x.src, '', '', '', '', '', '', '', '', ''].map(q).join(';'));
   saveBlob(new Blob(['﻿' + lines.join('\r\n')], { type:'text/csv;charset=utf-8' }), 'Reporte VIN - ' + S.file.name.replace(/\.xlsx$/i,'') + '.csv');
 }
 
@@ -735,12 +771,42 @@ function candidates(raw, ocr){
 }
 
 /* ---- Registro de ingreso / salida ---- */
-// con cuenta compartida, el nombre del operario (Ajustes) identifica quién escaneó
-function who(){ return cfg.operator || ((S.mode === 'graph' && S.account) ? (S.account.name || S.account.username) : ''); }
-function doIn(e){ e.found = true; e.exited = false; e.ingresoAt = new Date(); e.salidaAt = null; e.opTxt = who() ? 'Ing: ' + who() : ''; persist(e); }
-function doOut(e){ e.found = true; e.exited = true; e.salidaAt = new Date(); e.opTxt = [e.opTxt, who() ? 'Sal: ' + who() : ''].filter(Boolean).join(' · '); persist(e); }
-function undoOut(e){ e.exited = false; e.salidaAt = null; e.opTxt = (e.opTxt || '').replace(/\s*·?\s*Sal:.*$/, ''); persist(e); }
-function undoIn(e){ e.found = false; e.exited = false; e.ingresoAt = null; e.salidaAt = null; e.opTxt = ''; persist(e); }
+// Quién escaneó: el nombre que el operario puso en este celular; si no lo puso, el modelo del celular.
+// Nunca la cuenta compartida (escaner.vin), que es la misma para todos.
+function who(){ return cfg.operator || (cfg.device ? (/^(PC|Mac)/.test(cfg.device) ? '' : 'Celular ') + cfg.device : 'Celular sin nombre'); }
+function doIn(e){ e.found = true; e.exited = false; e.ingresoAt = new Date(); e.salidaAt = null; e.opIn = who(); e.opOut = ''; persist(e); }
+function doOut(e){ e.found = true; e.exited = true; e.salidaAt = new Date(); e.opOut = who(); persist(e); }
+function undoOut(e){ e.exited = false; e.salidaAt = null; e.opOut = ''; persist(e); }
+function undoIn(e){ e.found = false; e.exited = false; e.ingresoAt = null; e.salidaAt = null; e.opIn = ''; e.opOut = ''; persist(e); }
+
+/* Modelo del celular (no hay forma de leer el nombre del dueño desde un navegador) */
+async function detectDevice(){
+  try{
+    if(navigator.userAgentData?.getHighEntropyValues){
+      const v = await navigator.userAgentData.getHighEntropyValues(['model', 'platform']);
+      if(v.model) return v.model;
+    }
+  } catch{}
+  const ua = navigator.userAgent;
+  const m = ua.match(/Android [\d.]+; (?:[a-z]{2}-[a-z]{2}; )?([^;)]+?)(?: Build|\))/i);
+  if(m && m[1] && !/^K$/.test(m[1].trim())) return m[1].trim();
+  if(/iPhone/.test(ua)) return 'iPhone';
+  if(/iPad/.test(ua)) return 'iPad';
+  if(/Android/.test(ua)) return 'Android';
+  return /Windows/.test(ua) ? 'PC Windows' : /Mac/.test(ua) ? 'Mac' : '';
+}
+/* Pide el nombre del operario la primera vez (y cuando se quiera cambiar) */
+function askOperator(then){
+  openSheet(`<h3>¿Quién usa este celular?</h3>
+    <p class="muted">Tu nombre quedará en el Excel en cada ingreso y salida que registres. Se pide una sola vez en este celular (se puede cambiar en ⚙ Ajustes).</p>
+    <input class="t" id="opName" placeholder="Nombre y apellido" autocomplete="name" value="${esc(cfg.operator)}">
+    <button class="btn primary" id="opSave">Guardar</button>
+    <button class="btn" id="opSkip">Ahora no (usar “Celular ${esc(cfg.device || 'sin nombre')}”)</button>`);
+  const done = name => { cfg.operator = name; cfg.askedOp = true; store.set('vin_cfg', cfg); closeSheet(); if(then) then(); };
+  $('#opSave').onclick = () => { const n = $('#opName').value.trim(); if(!n) return toast('Escribe tu nombre'); done(n); };
+  $('#opSkip').onclick = () => done('');
+  setTimeout(() => $('#opName')?.focus(), 200);
+}
 function persist(e){ if(S.mode === 'graph') queueOp(e); else saveLocal(); }
 
 /* aplica el modo actual (INGRESO o SALIDA) a las filas de un VIN */
@@ -755,9 +821,9 @@ function act(list){
   return list.some(e => !e.exited) ? 'dup' : 'gone';
 }
 
-/* columnas INGRESO · SALIDA · DÍAS CUSTODIA · OPERARIO (se crean al final si no existen) */
+/* columnas FECHA/HORA/OPERARIO de INGRESO y SALIDA + DÍAS CUSTODIA (se crean al final si no existen) */
 function ensureTrack(sh){
-  if(sh.track.in && sh.track.out && sh.track.days && sh.track.op) return false;
+  if(TRACK.every(([k]) => sh.track[k])) return false;
   let c = sh.lastCol;
   for(const [k] of TRACK) if(!sh.track[k]) sh.track[k] = ++c;
   sh.lastCol = Math.max(sh.lastCol, ...Object.values(sh.track));
@@ -766,17 +832,17 @@ function ensureTrack(sh){
 }
 function trackCells(e, t){
   const L = k => colLetter(t[k]) + e.row;
+  const sIn = e.ingresoAt ? toSerial(e.ingresoAt) : null, sOut = e.salidaAt ? toSerial(e.salidaAt) : null;
   return {
-    in: e.ingresoAt ? toSerial(e.ingresoAt) : '',
-    out: e.salidaAt ? toSerial(e.salidaAt) : '',
-    days: e.ingresoAt ? `=IF(${L('in')}="","",IF(${L('out')}="",TODAY(),INT(${L('out')}))-INT(${L('in')})+1)` : '',
-    op: e.opTxt || ''
+    inD: sIn != null ? Math.floor(sIn) : '',  inT: sIn != null ? +(sIn - Math.floor(sIn)).toFixed(8) : '',  opIn: e.opIn || '',
+    outD: sOut != null ? Math.floor(sOut) : '', outT: sOut != null ? +(sOut - Math.floor(sOut)).toFixed(8) : '', opOut: e.opOut || '',
+    days: sIn != null ? `=IF(${L('inD')}="","",IF(${L('outD')}="",TODAY(),INT(${L('outD')}))-INT(${L('inD')})+1)` : ''
   };
 }
 function queueOp(e){
   const sh = S.sheets[e.sheet];
   const header = ensureTrack(sh);
-  const op = { v: 2, itemId: S.file.id, driveId: S.file.driveId, sheet: e.sheet, row: e.row, lastCol: sh.lastCol,
+  const op = { v: 3, itemId: S.file.id, driveId: S.file.driveId, sheet: e.sheet, row: e.row, lastCol: sh.lastCol,
     track: { ...sh.track }, header, headerRow: sh.headerRow || 0,
     fill: !e.found ? null : (e.exited ? cfg.colorOut : cfg.color), cells: trackCells(e, sh.track), state: stateOf(e) };
   // si ya hay un guardado pendiente para esa fila, se reemplaza (solo vale el último estado)
@@ -834,6 +900,7 @@ function afterLoad(quiet){
   if(!quiet) $('#result').classList.add('hidden');
   if(!S.entries.length) banner('No encontré ninguna columna de VIN/CHASIS en este archivo. Revisa que tenga un encabezado "VIN" o "CHASIS".');
   renderAll();
+  if(!quiet && !cfg.operator && !cfg.askedOp) askOperator();
 }
 function renderMode(){
   const m = cfg.scanMode === 'out' ? 'out' : 'in';
@@ -936,7 +1003,8 @@ function timesHtml(e){
     ${e.exited ? `<dt>Salida</dt><dd>${fmtDT(e.salidaAt)}</dd>` : ''}
     <dt>${e.exited ? 'Días en custodia' : 'Días hasta hoy'}</dt><dd>${d ?? '—'}${isLate(e) ? ' <span class="badge late">VENCIDO</span>' : ''}</dd>
     ${due && !e.exited ? `<dt>Vence custodia</dt><dd>${fmtD(due)}</dd>` : ''}
-    ${e.opTxt ? `<dt>Operario</dt><dd>${esc(e.opTxt)}</dd>` : ''}
+    ${e.opIn ? `<dt>Recibió</dt><dd>${esc(e.opIn)}</dd>` : ''}
+    ${e.exited && e.opOut ? `<dt>Despachó</dt><dd>${esc(e.opOut)}</dd>` : ''}
   </dl>`;
 }
 
@@ -1018,7 +1086,7 @@ function saveSettings(){
   cfg.colorOut = $('#sColorOut').value.toUpperCase();
   cfg.custodyDays = Math.max(0, parseInt($('#sDays').value, 10) || 0);
   cfg.sound = $('#sSound').checked;
-  cfg.operator = $('#sOp').value.trim();
+  cfg.operator = $('#sOp').value.trim(); cfg.askedOp = true;
   cfg.clientId = $('#sClient').value.trim(); cfg.tenant = $('#sTenant').value.trim() || 'organizations';
   store.set('vin_cfg', cfg); closeSheet();
   if(old !== JSON.stringify([cfg.folder, cfg.clientId, cfg.tenant, cfg.color, cfg.colorOut])) location.reload();
@@ -1194,7 +1262,7 @@ const Scan = {
 };
 
 /* ------------------------------ eventos ------------------------------ */
-$('#btnScan').onclick = () => { beep('none'); Scan.open(); };
+$('#btnScan').onclick = () => { beep('none'); if(!cfg.operator && !cfg.askedOp) askOperator(() => Scan.open()); else Scan.open(); };
 $('#scClose').onclick = $('#scDone').onclick = () => Scan.close();
 $('#scOcr').onclick = () => Scan.ocr();
 $('#scTorch').onclick = () => Scan.torch();
@@ -1258,6 +1326,7 @@ async function startGraph(){
 (async function init(){
   if('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
   const mode = store.get('vin_mode', '');
+  try{ cfg.device = await detectDevice(); } catch{}
   try{
     if(cfg.clientId){
       await initMsal();
