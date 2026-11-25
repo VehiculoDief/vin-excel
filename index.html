@@ -94,6 +94,22 @@ ul.list li.late{border-left:6px solid var(--bad)}
 .result.out .st{color:var(--blue)}
 .times{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin-top:8px;font-size:15px}
 .times dt{color:var(--muted)} .times dd{margin:0;font-weight:700}
+/* Resumen por marca y modelo */
+select.filter{font-weight:700}
+.sum-card{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden}
+.sum-card summary{list-style:none;cursor:pointer;padding:12px;display:flex;align-items:center;gap:10px}
+.sum-card summary::-webkit-details-marker{display:none}
+.sum-card summary .grow{flex:1;min-width:0;font-weight:800}
+.sum-card[open] summary{border-bottom:1px solid var(--line)}
+table.sum{width:100%;border-collapse:collapse;font-size:13px}
+table.sum th,table.sum td{padding:7px 8px;text-align:right;white-space:nowrap}
+table.sum th:first-child,table.sum td:first-child{text-align:left;white-space:normal}
+table.sum thead th{color:var(--muted);font-weight:600;border-bottom:1px solid var(--line)}
+table.sum tbody tr+tr td{border-top:1px solid var(--line)}
+.n-in{color:var(--in);font-weight:700}.n-out{color:var(--blue);font-weight:700}.n-late{color:var(--bad);font-weight:700}
+.mini{height:6px;background:var(--line);border-radius:9px;overflow:hidden;display:flex;margin-top:4px}
+.mini i{display:block;height:100%}.mini i.a{background:var(--blue)}.mini i.b{background:var(--in)}
+.sum-total{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
 /* Scanner */
 .scanner{position:fixed;inset:0;z-index:20;background:#000;color:#fff}
 .scanner video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
@@ -159,6 +175,7 @@ input.t{width:100%;border:1px solid var(--line);background:var(--card);border-ra
   </section>
 
   <section id="work" class="hidden">
+    <select id="fileFilter" class="filter hidden" aria-label="Manifiesto"></select>
     <div class="card progress">
       <div class="stats">
         <div><b id="sPend">0</b><span>Por llegar</span></div>
@@ -183,7 +200,9 @@ input.t{width:100%;border:1px solid var(--line);background:var(--card);border-ra
       <button data-tab="in">En almacén <span id="nIn"></span></button>
       <button data-tab="out">Salieron <span id="nOut"></span></button>
       <button data-tab="extra">No listados <span id="nExtra"></span></button>
+      <button data-tab="sum">📊 Resumen</button>
     </div>
+    <div id="summary" class="hidden"></div>
     <input id="filter" class="filter" placeholder="Filtrar lista…" autocomplete="off">
     <ul id="list" class="list"></ul>
     <p id="listMore" class="muted"></p>
@@ -208,7 +227,7 @@ input.t{width:100%;border:1px solid var(--line);background:var(--card);border-ra
 <div id="flash" class="flash"></div>
 <div id="sheet" class="sheet hidden"><div class="sheet-body" id="sheetBody"></div></div>
 <div id="toast"></div>
-<input type="file" id="fileLocal" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
+<input type="file" id="fileLocal" multiple accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
 <input type="file" id="fileUpload" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
 
 <script>
@@ -347,10 +366,16 @@ const S = {
   account: null,
   folder: null,        // {driveId, id, name, webUrl}
   hist: null,
-  file: null,          // {id, driveId, name, cTag, webUrl, createdDateTime, history:boolean} | {name, size, local:true}
-  wb: null, sheets: {}, entries: [], index: new Map(), vin17: [],
+  // manifiestos abiertos a la vez: {id, driveId, name, cTag, webUrl, createdDateTime, wb, sheets, entries, local?}
+  files: [], fileMap: {}, history: null,   // history = manifiesto del Historial que se está consultando
+  filter: 'all',                           // 'all' o el id de un manifiesto
+  entries: [], index: new Map(), vin17: [],
   extras: [], tab: 'pend', queue: store.get('vin_queue', []), busyReload: false
 };
+const extrasKey = () => S.mode === 'local' ? 'vin_extra_local' : 'vin_extra_active';
+const sheetOf = e => S.fileMap[e.fileId]?.sheets[e.sheet];
+const inView = e => S.filter === 'all' || e.fileId === S.filter;
+const shortName = n => String(n || '').replace(/\.xlsx$/i, '').replace(/^Formato\s+Almac[eé]n\s+/i, '');
 
 /* =====================================================================
    LECTURA DEL EXCEL
@@ -380,6 +405,27 @@ function headerScore(t){
   if(/\bSERIE\b|\bSERIAL\b/.test(u)) return 1;
   return 0;
 }
+
+/* Marca y modelo: se buscan por el nombre de la columna, sirva el formato que sea */
+function brandScore(h){ const u = normH(h); if(!u || u.length > 30) return 0; return /^(MARCA|MAKE|BRAND|FABRICANTE)\b/.test(u) ? 2 : /\bMARCA\b/.test(u) ? 1 : 0; }
+function modelScore(h){
+  const u = normH(h);
+  if(!u || u.length > 40 || /\bANO\b|YEAR|MOTOR|COD/.test(u)) return 0;       // "Año Modelo" no es el modelo
+  if(/^(MODELO|MODEL)$/.test(u)) return 4;
+  if(/^(MODELO|MODEL)\b/.test(u)) return 3;
+  if(/\bMODELO\b|\bMODEL\b/.test(u)) return 2;
+  if(/^(VERSION|DESCRIPCION( DEL VEHICULO)?|DESCRIPTION|AGRUP)/.test(u)) return 1;
+  return 0;
+}
+/* si el formato no trae la marca, se deduce del VIN (código del fabricante: 3 primeros caracteres) */
+const WMI = { LGW:'GREAT WALL', LS4:'CHANGAN', LS5:'CHANGAN', LS6:'CHANGAN', KNA:'KIA', KNB:'KIA', KNC:'KIA', KND:'KIA', KNE:'KIA',
+  KMH:'HYUNDAI', KMF:'HYUNDAI', KMJ:'HYUNDAI', MAL:'HYUNDAI', JTD:'TOYOTA', JTE:'TOYOTA', JTF:'TOYOTA', JTM:'TOYOTA', JTN:'TOYOTA', MR0:'TOYOTA', MR1:'TOYOTA', MR2:'TOYOTA', AHT:'TOYOTA',
+  MA3:'SUZUKI', JS2:'SUZUKI', JS3:'SUZUKI', JSA:'SUZUKI', LVV:'CHERY', LVT:'CHERY', LB3:'GEELY', L6T:'GEELY', LGX:'BYD', LC0:'BYD', LSJ:'MG', LSG:'SAIC', LJ1:'JAC', LJ8:'JAC',
+  LZW:'SGMW', LDC:'DONGFENG', LGA:'DONGFENG', LFV:'FAW', LFP:'FAW', LVH:'HONDA', JHM:'HONDA', MRH:'HONDA', JN1:'NISSAN', JN8:'NISSAN', '3N1':'NISSAN', MNT:'NISSAN',
+  JMB:'MITSUBISHI', MMB:'MITSUBISHI', MMC:'MITSUBISHI', MMA:'MITSUBISHI', JM1:'MAZDA', JM3:'MAZDA', MM8:'MAZDA', MAJ:'FORD', '1FA':'FORD', '1FT':'FORD',
+  '9BW':'VOLKSWAGEN', WVW:'VOLKSWAGEN', WV1:'VOLKSWAGEN', '9BG':'CHEVROLET', KL1:'CHEVROLET', LSV:'VOLKSWAGEN', VF1:'RENAULT', '93Y':'RENAULT', WDD:'MERCEDES-BENZ', WBA:'BMW',
+  JAA:'ISUZU', MPA:'ISUZU', JAL:'ISUZU', LKL:'KING LONG', LZY:'YUTONG', LA9:'BAIC', LNB:'BAIC', LJN:'JETOUR', LNN:'CHERY' };
+const brandFromVin = v => v.length === 17 ? (WMI[v.slice(0, 3)] || '') : '';
 
 async function parseWorkbook(buf){
   await loadScript(LIB.exceljs);
@@ -427,7 +473,10 @@ async function parseWorkbook(buf){
       if(u === 'INGRESO') legacy.in = c; if(u === 'SALIDA') legacy.out = c; if(u === 'OPERARIO') legacy.op = c;
     });
     const lastCol = Math.max(headers.length - 1, maxCol, 1);
-    const sh = { name: ws.name, ws, headers, headerRow: headerRow ? headerRow.rn : 0, vinCol, lastCol, markerCol, track, legacy };
+    // columnas de marca y modelo (la de mejor coincidencia; nunca la del VIN ni las de la app)
+    const pickCol = score => { let best = 0, col = 0; headers.forEach((h, c) => { if(c === vinCol || Object.values(track).includes(c)) return; const s = score(h); if(s > best){ best = s; col = c; } }); return col; };
+    const brandCol = pickCol(brandScore), modelCol = pickCol(modelScore);
+    const sh = { name: ws.name, ws, headers, headerRow: headerRow ? headerRow.rn : 0, vinCol, lastCol, markerCol, track, legacy, brandCol, modelCol };
     let n = 0;
     for(const r of rows){
       if(headerRow && r.rn <= headerRow.rn) continue;
@@ -446,6 +495,8 @@ async function parseWorkbook(buf){
       if(!track.opIn && legacy.op){ const o = r.vals[legacy.op] || ''; opIn = (o.match(/Ing:\s*([^·]+)/) || [,''])[1].trim(); opOut = (o.match(/Sal:\s*(.+)$/) || [,''])[1].trim(); }
       entries.push({ id: ws.name + '!' + r.rn, vin: v, sheet: ws.name, row: r.rn, vals: r.vals,
         found, exited, ingresoAt, salidaAt, opIn, opOut,
+        brand: ((brandCol && r.vals[brandCol]) || brandFromVin(v) || 'SIN MARCA').trim().toUpperCase().replace(/\s+/g, ' '),
+        model: ((modelCol && r.vals[modelCol]) || 'SIN MODELO').trim().toUpperCase().replace(/\s+/g, ' '),
         wasFound: found, wasExited: exited });
       n++;
     }
@@ -454,17 +505,26 @@ async function parseWorkbook(buf){
   return { wb, sheets, entries };
 }
 
-function setData({wb, sheets, entries}){
-  S.wb = wb; S.sheets = sheets; S.entries = entries;
-  S.index = new Map();
-  for(const e of entries){ if(!S.index.has(e.vin)) S.index.set(e.vin, []); S.index.get(e.vin).push(e); }
-  S.vin17 = [...S.index.keys()].filter(v => v.length === 17);
+/* convierte el resultado de parseWorkbook en un manifiesto con identidad propia */
+function makeFile(meta, data){
+  const f = Object.assign({}, meta, { wb: data.wb, sheets: data.sheets, entries: data.entries });
+  for(const e of f.entries){ e.fileId = f.id; e.fileName = f.name; e.id = f.id + '|' + e.sheet + '!' + e.row; }
   // operaciones pendientes de subir (sin internet) siguen contando
   for(const op of S.queue){
-    if(!S.file || op.itemId !== S.file.id) continue;
-    const e = entries.find(x => x.sheet === op.sheet && x.row === op.row); if(!e) continue;
-    if(op.state) applyState(e, op.state); else e.found = op.type === 'mark';
+    if(op.itemId !== f.id) continue;
+    const e = f.entries.find(x => x.sheet === op.sheet && x.row === op.row);
+    if(e && op.state) applyState(e, op.state);
   }
+  return f;
+}
+/* junta todos los manifiestos abiertos en un solo índice de búsqueda */
+function rebuild(){
+  S.fileMap = Object.fromEntries(S.files.map(f => [f.id, f]));
+  if(S.filter !== 'all' && !S.fileMap[S.filter]) S.filter = 'all';
+  S.entries = S.files.flatMap(f => f.entries);
+  S.index = new Map();
+  for(const e of S.entries){ if(!S.index.has(e.vin)) S.index.set(e.vin, []); S.index.get(e.vin).push(e); }
+  S.vin17 = [...S.index.keys()].filter(v => v.length === 17);
 }
 /* estado de un vehículo, para la cola sin conexión y el modo teléfono */
 function stateOf(e){ return { f: e.found, x: e.exited, i: e.ingresoAt ? +e.ingresoAt : 0, s: e.salidaAt ? +e.salidaAt : 0, oi: e.opIn || '', oo: e.opOut || '' }; }
@@ -475,7 +535,7 @@ function applyState(e, st){
 
 /* Resumen de una fila: campos útiles para mostrar */
 function rowFields(e, max = 99){
-  const sh = S.sheets[e.sheet]; const out = [];
+  const sh = sheetOf(e); const out = [];
   const pref = /MARCA|MODELO|COLOR|DESCRIP|BL\b|B\/L|CONSIGN|CLIENTE|A[NÑ]O|UBIC|ZONA|DESTINO/i;
   const cols = [];
   const skip = new Set([sh.vinCol, sh.markerCol, ...Object.values(sh.track || {}), ...Object.values(sh.legacy || {})]);
@@ -559,54 +619,71 @@ async function listChildren(driveId, id){
 const isXlsx = it => it.file && /\.xlsx$/i.test(it.name) && !it.name.startsWith('~$');
 const byNewest = (a, b) => new Date(b.createdDateTime) - new Date(a.createdDateTime);
 
-/* Revisa la carpeta: el .xlsx más nuevo es el activo, los anteriores pasan a Historial */
+/* Revisa la carpeta: TODOS los .xlsx de la carpeta son manifiestos activos (pueden ser de formatos distintos).
+   Un manifiesto pasa a Historial cuando salieron todos sus vehículos, o a mano con el botón "Archivar". */
 async function refreshFolder({ initial = false } = {}){
   setSync('busy', 'Revisando carpeta…');
   const F = S.folder;
   const kids = await listChildren(F.driveId, F.id);
-  let hist = kids.find(k => k.folder && k.name.toLowerCase() === CONFIG.historyFolder.toLowerCase());
-  const files = kids.filter(isXlsx).sort(byNewest);
-  if(!files.length){
-    if(!S.file || !S.file.history){ $('#emptyFolder').textContent = F.name; show('empty'); }
-    setSync('ok'); return;
+  S.hist = kids.find(k => k.folder && k.name.toLowerCase() === CONFIG.historyFolder.toLowerCase()) || null;
+  const items = kids.filter(isXlsx).sort(byNewest);
+  if(S.history){ setSync('ok'); return; }          // consultando el Historial: no se recargan los activos
+  if(!items.length){ S.files = []; rebuild(); $('#emptyFolder').textContent = F.name; show('empty'); setSync('ok'); return; }
+  const firstLoad = !S.files.length;
+  if(firstLoad) loading(`Abriendo ${items.length} manifiesto(s)…`);
+  const pendingIds = new Set(S.queue.map(q => q.itemId));
+  const next = [];
+  let changed = false;
+  for(const it of items){
+    const cur = S.files.find(f => f.id === it.id);
+    if(cur && (cur.cTag === it.cTag || pendingIds.has(it.id))){ next.push(cur); continue; }
+    try{
+      next.push(await loadGraphFile(it, F.driveId));
+      changed = true;
+      if(!cur && !initial && !firstLoad){ toast('🆕 Nuevo manifiesto: ' + it.name, 4000); beep('new'); }
+    } catch(e){ toast('No se pudo abrir ' + it.name + ': ' + e.message, 5000); if(cur) next.push(cur); }
   }
-  const active = files[0];
-  if(files.length > 1){
-    if(!hist) hist = await gfetch(`/drives/${F.driveId}/items/${F.id}/children`, { method:'POST', json:{ name: CONFIG.historyFolder, folder:{}, '@microsoft.graph.conflictBehavior':'replace' } });
-    for(const old of files.slice(1)){
-      await gfetch(`/drives/${F.driveId}/items/${old.id}?@microsoft.graph.conflictBehavior=rename`, { method:'PATCH', json:{ parentReference:{ id: hist.id } } });
-    }
-    toast(`📁 ${files.length - 1} archivo(s) anterior(es) guardado(s) en ${CONFIG.historyFolder}`);
-  }
-  S.hist = hist || null;
-  if(S.file && S.file.history){
-    if(active.id !== S.file.activeId) banner(`Hay un manifiesto nuevo: <b>${esc(active.name)}</b>. <button class="btn sm" data-act="current">Abrir</button>`);
-    setSync('ok'); return;
-  }
-  if(!S.file || S.file.id !== active.id){
-    if(S.file && !initial){ toast('🆕 Nuevo manifiesto: ' + active.name, 4000); beep('new'); }
-    await loadGraphFile(active, { driveId: F.driveId });
-  } else if(active.cTag !== S.file.cTag && !S.queue.length){
-    await loadGraphFile(active, { driveId: F.driveId, quiet: true });
-  }
+  if(next.length !== S.files.length) changed = true;
+  S.files = next;
+  if(changed || firstLoad){ rebuild(); afterLoad(!firstLoad); }
+  await autoArchive();
   setSync('ok', 'Sincronizado ' + nowTxt());
 }
 
-async function loadGraphFile(item, { driveId, quiet = false, history = false } = {}){
-  if(!quiet) loading('Abriendo ' + item.name + '…');
-  setSync('busy', 'Descargando…');
+async function loadGraphFile(item, driveId){
+  setSync('busy', 'Descargando ' + item.name + '…');
   const d = driveId || item.parentReference?.driveId;
   const meta = await gfetch(`/drives/${d}/items/${item.id}`);
   const buf = await (await fetch(meta['@microsoft.graph.downloadUrl'])).arrayBuffer();
   const data = await parseWorkbook(buf);
-  const prevActive = S.file && !S.file.history ? S.file.id : (S.file && S.file.activeId);
-  S.file = { id: meta.id, driveId: d, name: meta.name, cTag: meta.cTag, webUrl: meta.webUrl, createdDateTime: meta.createdDateTime, history, activeId: history ? prevActive : meta.id };
-  S.extras = store.get('vin_extra_' + meta.id, []);
-  setData(data);
-  if(!history) banner('');
-  else banner(`Estás viendo un archivo del <b>Historial</b>. <button class="btn sm" data-act="current">Volver al actual</button>`);
-  afterLoad(quiet);
-  setSync('ok', 'Sincronizado ' + nowTxt());
+  return makeFile({ id: meta.id, driveId: d, name: meta.name, cTag: meta.cTag, webUrl: meta.webUrl, createdDateTime: meta.createdDateTime }, data);
+}
+
+/* mueve un manifiesto a la subcarpeta Historial (queda guardado con sus marcas) */
+async function archiveFile(f, auto){
+  const F = S.folder;
+  if(S.queue.some(q => q.itemId === f.id)) return toast('Espera a que se guarden los cambios de ' + f.name);
+  if(!S.hist) S.hist = await gfetch(`/drives/${F.driveId}/items/${F.id}/children`, { method:'POST', json:{ name: CONFIG.historyFolder, folder:{}, '@microsoft.graph.conflictBehavior':'replace' } });
+  await gfetch(`/drives/${F.driveId}/items/${f.id}?@microsoft.graph.conflictBehavior=rename`, { method:'PATCH', json:{ parentReference:{ id: S.hist.id } } });
+  S.files = S.files.filter(x => x.id !== f.id); rebuild();
+  toast(`📁 ${shortName(f.name)} ${auto ? '(salieron todos sus vehículos) ' : ''}se guardó en ${CONFIG.historyFolder}`, 4500);
+  if(S.files.length) afterLoad(true); else { $('#emptyFolder').textContent = F.name; show('empty'); }
+}
+async function autoArchive(){
+  for(const f of [...S.files]){
+    if(f.entries.length && f.entries.every(e => e.exited) && !S.queue.some(q => q.itemId === f.id)){
+      try{ await archiveFile(f, true); } catch{}
+    }
+  }
+}
+
+/* abre un manifiesto del Historial solo para consultarlo */
+async function openHistory(id){
+  loading('Abriendo del Historial…');
+  const f = await loadGraphFile({ id }, S.folder.driveId);
+  S.history = f; S.files = [f]; S.filter = 'all'; rebuild();
+  banner(`Estás viendo <b>${esc(shortName(f.name))}</b> del <b>Historial</b>. <button class="btn sm" data-act="current">Volver a los activos</button>`);
+  afterLoad();
 }
 
 /* Cola de escritura en el Excel de OneDrive (soporta pérdida de señal) */
@@ -675,8 +752,8 @@ async function uploadManifest(file){
       }
     }
     toast('✅ Manifiesto subido');
-    if(S.file) S.file.history = false;
-    S.file = null;
+    S.history = null; banner('');
+    if(!S.files.length) loading('Abriendo…');
     await refreshFolder();
   } catch(e){ errorScreen(e); }
 }
@@ -684,38 +761,49 @@ async function uploadManifest(file){
 /* =====================================================================
    MODO LOCAL (archivo en el teléfono)
    ===================================================================== */
-async function openLocal(file, buf){
-  loading('Leyendo ' + file.name + '…');
+/* abre uno o varios Excel del teléfono (se suman a los que ya estaban abiertos) */
+async function openLocal(list, restoring){
   try{
-    buf = buf || await file.arrayBuffer();
-    const data = await parseWorkbook(buf);
     S.mode = 'local';
-    S.file = { name: file.name, size: file.size || buf.byteLength, local: true };
-    S.file.id = 'local_' + S.file.name + '_' + S.file.size;
-    setData(data);
-    const saved = store.get('vin_local_' + S.file.id, {});
-    for(const e of S.entries){
-      const st = saved[e.id];
-      if(st && typeof st === 'object') applyState(e, st);
-      else if(st){ e.found = true; }            // formato anterior
-      else if(st === 0){ e.found = false; }
+    for(const item of list){
+      loading('Leyendo ' + item.name + '…');
+      const buf = item.buf || await item.arrayBuffer();
+      const id = 'local_' + item.name + '_' + buf.byteLength;
+      const f = makeFile({ id, name: item.name, size: buf.byteLength, local: true, buf }, await parseWorkbook(buf));
+      const saved = store.get('vin_local_' + id, {});
+      for(const e of f.entries){
+        const st = saved[e.id] ?? saved[e.sheet + '!' + e.row];   // también el formato de versiones anteriores
+        if(st && typeof st === 'object') applyState(e, st);
+        else if(st){ e.found = true; }
+        else if(st === 0){ e.found = false; }
+      }
+      S.files = S.files.filter(x => x.name !== f.name).concat(f);
     }
-    S.extras = store.get('vin_extra_' + S.file.id, []);
-    await idb.set('lastLocal', { name: file.name, buf });
+    rebuild();
+    S.extras = store.get(extrasKey(), []);
+    if(!restoring) await idb.set('localFiles', S.files.map(f => ({ name: f.name, buf: f.buf })));
     store.set('vin_mode', 'local');
     banner(''); afterLoad();
   } catch(e){ errorScreen(e); }
 }
-function saveLocal(){
-  const m = {};
-  for(const e of S.entries){ if(e.found || e.wasFound) m[e.id] = stateOf(e); }
-  store.set('vin_local_' + S.file.id, m);
+async function closeLocal(f){
+  S.files = S.files.filter(x => x.id !== f.id); rebuild();
+  await idb.set('localFiles', S.files.map(x => ({ name: x.name, buf: x.buf })));
+  if(S.files.length) afterLoad(true); else show('welcome');
 }
-async function downloadMarked(){
+function saveLocal(fileId){
+  for(const f of S.files){
+    if(fileId && f.id !== fileId) continue;
+    const m = {};
+    for(const e of f.entries){ if(e.found || e.wasFound) m[e.id] = stateOf(e); }
+    store.set('vin_local_' + f.id, m);
+  }
+}
+async function downloadMarked(f){
   const argb = h => 'FF' + h.replace('#','').toUpperCase();
-  for(const e of S.entries){
+  for(const e of f.entries){
     if(!e.found && !e.wasFound) continue;
-    const sh = S.sheets[e.sheet]; const row = sh.ws.getRow(e.row);
+    const sh = sheetOf(e); const row = sh.ws.getRow(e.row);
     if(e.found && ensureTrack(sh) && sh.headerRow){
       const hr = sh.ws.getRow(sh.headerRow);
       for(const [k, name] of TRACK){ const hc = hr.getCell(sh.track[k]); hc.value = name; hc.font = { bold: true }; }
@@ -732,21 +820,43 @@ async function downloadMarked(){
       }
     }
   }
-  S.wb.calcProperties = Object.assign(S.wb.calcProperties || {}, { fullCalcOnLoad: true });
-  const out = await S.wb.xlsx.writeBuffer();
-  saveBlob(new Blob([out], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), S.file.name.replace(/\.xlsx$/i, '') + ' - ESCANEADO.xlsx');
+  f.wb.calcProperties = Object.assign(f.wb.calcProperties || {}, { fullCalcOnLoad: true });
+  const out = await f.wb.xlsx.writeBuffer();
+  saveBlob(new Blob([out], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), f.name.replace(/\.xlsx$/i, '') + ' - ESCANEADO.xlsx');
 }
 function saveBlob(blob, name){ const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500); }
 function exportCsv(){
   const q = v => '"' + String(v ?? '').replace(/"/g,'""') + '"';
   const hhmm = d => d ? d.toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit', hour12:false }) : '';
-  const lines = [['VIN','Estado','Fecha ingreso','Hora ingreso','Operario ingreso','Fecha salida','Hora salida','Operario salida','Días custodia','Vence','Vencido','Hoja','Fila','Detalle'].map(q).join(';')];
-  for(const e of S.entries) lines.push([e.vin, e.exited ? 'SALIÓ' : e.found ? 'EN ALMACÉN' : 'POR LLEGAR',
+  const lines = [['Manifiesto','VIN','Marca','Modelo','Estado','Fecha ingreso','Hora ingreso','Operario ingreso','Fecha salida','Hora salida','Operario salida','Días custodia','Vence','Vencido','Hoja','Fila','Detalle'].map(q).join(';')];
+  for(const e of S.entries.filter(inView)) lines.push([shortName(e.fileName), e.vin, e.brand, e.model, e.exited ? 'SALIÓ' : e.found ? 'EN ALMACÉN' : 'POR LLEGAR',
     e.ingresoAt ? fmtD(e.ingresoAt) : '', hhmm(e.ingresoAt), e.opIn || '',
     e.salidaAt ? fmtD(e.salidaAt) : '', hhmm(e.salidaAt), e.opOut || '',
     custody(e) ?? '', dueDate(e) ? fmtD(dueDate(e)) : '', isLate(e) ? 'SÍ' : '', e.sheet, e.row, rowSummary(e)].map(q).join(';'));
-  for(const x of S.extras) lines.push([x.vin, 'NO EN MANIFIESTO', x.at, '', x.src, '', '', '', '', '', '', '', '', ''].map(q).join(';'));
-  saveBlob(new Blob(['﻿' + lines.join('\r\n')], { type:'text/csv;charset=utf-8' }), 'Reporte VIN - ' + S.file.name.replace(/\.xlsx$/i,'') + '.csv');
+  for(const x of S.extras) lines.push(['', x.vin, '', '', 'NO EN MANIFIESTO', x.at, '', x.src, '', '', '', '', '', '', '', '', ''].map(q).join(';'));
+  saveBlob(new Blob(['﻿' + lines.join('\r\n')], { type:'text/csv;charset=utf-8' }), 'Reporte VIN ' + new Date().toISOString().slice(0, 10) + '.csv');
+}
+/* resumen por marca y modelo (de los manifiestos que se están viendo) */
+function summaryData(){
+  const brands = new Map();
+  for(const e of S.entries.filter(inView)){
+    const st = e.exited ? 'out' : e.found ? 'in' : 'pend';
+    if(!brands.has(e.brand)) brands.set(e.brand, { name: e.brand, tot: 0, pend: 0, in: 0, out: 0, late: 0, models: new Map() });
+    const b = brands.get(e.brand);
+    if(!b.models.has(e.model)) b.models.set(e.model, { name: e.model, tot: 0, pend: 0, in: 0, out: 0, late: 0 });
+    for(const g of [b, b.models.get(e.model)]){ g.tot++; g[st]++; if(isLate(e)) g.late++; }
+  }
+  const sortG = m => [...m.values()].sort((a, b) => b.tot - a.tot || a.name.localeCompare(b.name));
+  return sortG(brands).map(b => ({ ...b, models: sortG(b.models) }));
+}
+function exportSummaryCsv(){
+  const q = v => '"' + String(v ?? '').replace(/"/g,'""') + '"';
+  const lines = [['Marca','Modelo','Total','Por llegar','En almacén','Salieron','Recibidos','Vencidos'].map(q).join(';')];
+  for(const b of summaryData()){
+    for(const m of b.models) lines.push([b.name, m.name, m.tot, m.pend, m.in, m.out, m.in + m.out, m.late].map(q).join(';'));
+    lines.push([b.name, 'TOTAL ' + b.name, b.tot, b.pend, b.in, b.out, b.in + b.out, b.late].map(q).join(';'));
+  }
+  saveBlob(new Blob(['﻿' + lines.join('\r\n')], { type:'text/csv;charset=utf-8' }), 'Resumen marca-modelo ' + new Date().toISOString().slice(0, 10) + '.csv');
 }
 
 /* =====================================================================
@@ -807,7 +917,7 @@ function askOperator(then){
   $('#opSkip').onclick = () => done('');
   setTimeout(() => $('#opName')?.focus(), 200);
 }
-function persist(e){ if(S.mode === 'graph') queueOp(e); else saveLocal(); }
+function persist(e){ if(S.mode === 'graph') queueOp(e); else saveLocal(e.fileId); }
 
 /* aplica el modo actual (INGRESO o SALIDA) a las filas de un VIN */
 function act(list){
@@ -840,9 +950,9 @@ function trackCells(e, t){
   };
 }
 function queueOp(e){
-  const sh = S.sheets[e.sheet];
+  const sh = sheetOf(e), f = S.fileMap[e.fileId];
   const header = ensureTrack(sh);
-  const op = { v: 3, itemId: S.file.id, driveId: S.file.driveId, sheet: e.sheet, row: e.row, lastCol: sh.lastCol,
+  const op = { v: 3, itemId: f.id, driveId: f.driveId, sheet: e.sheet, row: e.row, lastCol: sh.lastCol,
     track: { ...sh.track }, header, headerRow: sh.headerRow || 0,
     fill: !e.found ? null : (e.exited ? cfg.colorOut : cfg.color), cells: trackCells(e, sh.track), state: stateOf(e) };
   // si ya hay un guardado pendiente para esa fila, se reemplaza (solo vale el último estado)
@@ -851,7 +961,7 @@ function queueOp(e){
   S.queue.push(op); saveQueue(); flushQueue();
 }
 function addExtra(vin, src){
-  if(!S.extras.some(x => x.vin === vin)){ S.extras.unshift({ vin, at: nowTxt(), src }); store.set('vin_extra_' + S.file.id, S.extras); }
+  if(!S.extras.some(x => x.vin === vin)){ S.extras.unshift({ vin, at: nowTxt(), src }); store.set(extrasKey(), S.extras); }
 }
 
 let lastHit = { v:'', t:0 };
@@ -896,9 +1006,17 @@ function beep(kind){
    ===================================================================== */
 function afterLoad(quiet){
   show('work');
-  $('#fileChip').textContent = (S.file.history ? '🕘 ' : '📄 ') + S.file.name;
+  const n = S.files.length;
+  $('#fileChip').textContent = S.history ? '🕘 ' + shortName(S.history.name) : n === 1 ? '📄 ' + shortName(S.files[0].name) : `📄 ${n} manifiestos activos`;
+  // selector de manifiesto (solo si hay más de uno)
+  const sel = $('#fileFilter');
+  sel.classList.toggle('hidden', n < 2);
+  sel.innerHTML = `<option value="all">Todos los manifiestos (${n})</option>` +
+    S.files.map(f => `<option value="${esc(f.id)}">${esc(shortName(f.name))} · ${f.entries.length} veh.</option>`).join('');
+  sel.value = S.filter;
   if(!quiet) $('#result').classList.add('hidden');
-  if(!S.entries.length) banner('No encontré ninguna columna de VIN/CHASIS en este archivo. Revisa que tenga un encabezado "VIN" o "CHASIS".');
+  const sinVin = S.files.filter(f => !f.entries.length);
+  if(sinVin.length && !S.history) banner('No encontré la columna de VIN/CHASIS en: <b>' + sinVin.map(f => esc(f.name)).join(', ') + '</b>. Revisa que tenga un encabezado “VIN”, “CHASIS” o “SERIE”.');
   renderAll();
   if(!quiet && !cfg.operator && !cfg.askedOp) askOperator();
 }
@@ -910,9 +1028,10 @@ function renderMode(){
   $('#scLbl').textContent = m === 'out' ? 'SALIDA · apunta al código de barras del VIN' : 'INGRESO · apunta al código de barras del VIN';
 }
 function renderAll(){
-  const tot = S.entries.length;
-  const nIn = S.entries.filter(e => e.found && !e.exited).length, nOut = S.entries.filter(e => e.exited).length, pend = tot - nIn - nOut;
-  const late = S.entries.filter(isLate).length;
+  const V = S.entries.filter(inView);
+  const tot = V.length;
+  const nIn = V.filter(e => e.found && !e.exited).length, nOut = V.filter(e => e.exited).length, pend = tot - nIn - nOut;
+  const late = V.filter(isLate).length;
   $('#sPend').textContent = pend; $('#sIn').textContent = nIn; $('#sOut').textContent = nOut;
   $('#barIn').style.width = tot ? (nIn / tot * 100).toFixed(1) + '%' : 0;
   $('#barOut').style.width = tot ? (nOut / tot * 100).toFixed(1) + '%' : 0;
@@ -929,16 +1048,22 @@ function renderList(){
   const ql = $('#filter').value.trim().toLowerCase();
   let items, html = '';
   const LIMIT = 250;
+  const isSum = S.tab === 'sum';
+  $('#summary').classList.toggle('hidden', !isSum);
+  $('#list').classList.toggle('hidden', isSum);
+  $('#filter').placeholder = isSum ? 'Filtrar marca o modelo…' : 'Filtrar lista…';
+  if(isSum){ renderSummary(ql); $('#listMore').textContent = ''; return; }
+  const many = S.files.length > 1 && S.filter === 'all';
   if(S.tab === 'extra'){
     items = S.extras.filter(x => !q || x.vin.includes(q));
     html = items.slice(0, LIMIT).map(x => `<li class="extra"><div class="grow"><div class="vin">${esc(x.vin)}</div><div class="meta">${esc(x.at)} · ${esc(x.src)}</div></div></li>`).join('');
   } else {
     const inTab = e => S.tab === 'pend' ? !e.found : S.tab === 'in' ? (e.found && !e.exited) : e.exited;
-    items = S.entries.filter(e => inTab(e) && (!ql || e.vin.includes(q) || e.vals.some(v => v && v.toLowerCase().includes(ql))));
+    items = S.entries.filter(e => inView(e) && inTab(e) && (!ql || e.vin.includes(q) || e.vals.some(v => v && v.toLowerCase().includes(ql))));
     if(S.tab === 'in') items.sort((a, b) => (isLate(b) - isLate(a)) || ((a.ingresoAt || 0) - (b.ingresoAt || 0)));   // vencidos y más antiguos primero
     if(S.tab === 'out') items.sort((a, b) => (b.salidaAt || 0) - (a.salidaAt || 0));
     html = items.slice(0, LIMIT).map(e => {
-      let cls = '', meta = esc(rowSummary(e)) || 'Fila ' + e.row, badge = `<span class="badge">F${e.row}</span>`;
+      let cls = '', meta = esc(e.brand + ' · ' + e.model) + (many ? ' · 📄 ' + esc(shortName(e.fileName)) : ''), badge = `<span class="badge">F${e.row}</span>`;
       if(e.exited){ cls = 'exited'; meta = `Salió ${shortDT(e.salidaAt) || '—'} · ${custody(e) ?? '—'} día(s) · ${meta}`; badge = `<span class="badge out">${custody(e) ?? '—'} d</span>`; }
       else if(e.found){
         const d = custody(e), late = isLate(e);
@@ -952,6 +1077,25 @@ function renderList(){
   const empty = { pend: S.entries.length ? '🎉 Ya llegaron todos' : 'Nada por aquí', in: 'No hay vehículos en el almacén', out: 'Todavía no sale ningún vehículo', extra: 'Nada por aquí' };
   $('#list').innerHTML = html || `<li class="muted">${empty[S.tab]}</li>`;
   $('#listMore').textContent = items.length > LIMIT ? `Mostrando ${LIMIT} de ${items.length}. Usa el filtro para encontrar más.` : '';
+}
+
+/* pestaña Resumen: vehículos por marca y modelo */
+function renderSummary(ql){
+  const data = summaryData().filter(b => !ql || b.name.toLowerCase().includes(ql) || b.models.some(m => m.name.toLowerCase().includes(ql)));
+  const T = data.reduce((a, b) => { for(const k of ['tot','pend','in','out','late']) a[k] += b[k]; return a; }, { tot:0, pend:0, in:0, out:0, late:0 });
+  const pct = (a, t) => t ? (a / t * 100).toFixed(1) + '%' : '0';
+  const row = (g, bold) => `<tr${bold ? ' style="font-weight:800"' : ''}><td>${esc(g.name)}</td><td>${g.tot}</td><td>${g.pend}</td><td class="n-in">${g.in}</td><td class="n-out">${g.out}</td>${+cfg.custodyDays ? `<td class="${g.late ? 'n-late' : ''}">${g.late}</td>` : ''}</tr>`;
+  const head = `<thead><tr><th>Modelo</th><th>Total</th><th>Por llegar</th><th>En alm.</th><th>Salieron</th>${+cfg.custodyDays ? '<th>Venc.</th>' : ''}</tr></thead>`;
+  const scope = S.filter === 'all' ? (S.files.length > 1 ? `${S.files.length} manifiestos` : shortName(S.files[0]?.name)) : shortName(S.fileMap[S.filter]?.name);
+  $('#summary').innerHTML = `
+    <div class="sum-total"><div><b>${T.in + T.out} de ${T.tot}</b> recibidos <span class="muted">· ${esc(scope || '')}</span></div>
+      <button class="btn sm" data-act="sumcsv">⬇ CSV</button></div>
+    ${data.map((b, i) => `<details class="sum-card"${i < 3 || ql ? ' open' : ''}>
+      <summary><span class="grow">${esc(b.name)} <span class="muted">· ${b.models.length} modelo(s)</span></span>
+        <span class="badge ok">${b.in + b.out}/${b.tot}</span></summary>
+      <div class="mini" style="margin:0 12px"><i class="a" style="width:${pct(b.out, b.tot)}"></i><i class="b" style="width:${pct(b.in, b.tot)}"></i></div>
+      <div style="overflow-x:auto"><table class="sum">${head}<tbody>${b.models.map(m => row(m)).join('')}${b.models.length > 1 ? row({ ...b, name: 'Total ' + b.name }, true) : ''}</tbody></table></div>
+    </details>`).join('') || '<p class="muted">Sin datos.</p>'}`;
 }
 
 function vinDiffHtml(read, real){ return [...real].map((c, i) => read[i] === c ? esc(c) : `<b class="diff">${esc(c)}</b>`).join(''); }
@@ -976,7 +1120,7 @@ function renderResult(r){
       <button class="btn sm" data-do="forceout" data-id="${esc(e.id)}">Registrar salida sin fecha de ingreso</button>`;
     h = `<div class="st">${T[1]}</div>
       <div class="vin big">${esc(e.vin)}</div>
-      <div class="muted">Hoja <b>${esc(e.sheet)}</b> · Fila <b>${e.row}</b>${r.list.length > 1 ? ` · aparece ${r.list.length} veces` : ''}</div>
+      <div class="muted">${S.files.length > 1 ? '📄 <b>' + esc(shortName(e.fileName)) + '</b> · ' : ''}Hoja <b>${esc(e.sheet)}</b> · Fila <b>${e.row}</b>${r.list.length > 1 ? ` · aparece ${r.list.length} veces` : ''}</div>
       ${timesHtml(e)}
       <dl class="fields">${rowFields(e, 6).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
       ${btns}`;
@@ -1021,7 +1165,7 @@ function pick(vin){
   // si venía de "no en manifiesto" por mala lectura, quitarlo de esa lista
   const r = { kind: act(list), vin, list };
   S.extras = S.extras.filter(x => !(x.vin.length === 17 && vin.length === 17 && hamming(x.vin, vin, 4) <= 4));
-  store.set('vin_extra_' + S.file.id, S.extras);
+  store.set(extrasKey(), S.extras);
   feedback(r.kind); renderResult(r); renderAll();
 }
 
@@ -1031,23 +1175,29 @@ function closeSheet(){ $('#sheet').classList.add('hidden'); }
 function fmtDate(d){ return d ? new Date(d).toLocaleString('es-PE', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' }) : ''; }
 
 async function openFiles(){
-  const head = `<h3>Archivos <button data-act="close">✕</button></h3>`;
+  const head = `<h3>Manifiestos <button data-act="close">✕</button></h3>`;
+  const stats = f => { const n = f.entries.length, i = f.entries.filter(e => e.found && !e.exited).length, o = f.entries.filter(e => e.exited).length;
+    return `${n} veh. · ${n - i - o} por llegar · ${i} en almacén · ${o} salieron`; };
+  const card = f => `<div class="card"><b style="word-break:break-word">${esc(f.name)}</b>
+      <div class="muted">${stats(f)}${f.createdDateTime ? ' · subido ' + fmtDate(f.createdDateTime) : ''}</div>
+      <div>${f.webUrl ? `<a class="btn sm" href="${esc(f.webUrl)}" target="_blank" rel="noopener">Abrir en Excel</a>` : ''}
+      ${f.local ? `<button class="btn sm" data-act="download" data-id="${esc(f.id)}">⬇ Excel sombreado</button><button class="btn sm danger" data-act="closelocal" data-id="${esc(f.id)}">Cerrar</button>`
+                : S.history ? '' : `<button class="btn sm" data-act="archive" data-id="${esc(f.id)}">📁 Archivar</button>`}</div></div>`;
   if(S.mode === 'local'){
-    openSheet(head + `<div class="card"><b>${esc(S.file?.name || '—')}</b><div class="muted">Modo teléfono · el progreso se guarda en este equipo</div>
-      <button class="btn primary" data-act="download">⬇ Descargar Excel sombreado</button>
+    openSheet(head + `<p class="muted">Modo teléfono · el progreso se guarda en este equipo. Puedes tener varios Excel abiertos a la vez, aunque tengan formatos distintos.</p>
+      ${S.files.map(card).join('')}
+      <button class="btn primary" data-act="local">➕ Agregar otro Excel</button>
       <button class="btn" data-act="csv">⬇ Reporte CSV</button>
-      <button class="btn" data-act="local">Abrir otro Excel</button></div>
       ${cfg.clientId ? '<button class="btn" data-act="login">Cambiar a OneDrive</button>' : ''}`);
     return;
   }
   if(S.mode !== 'graph') return;
-  openSheet(head + `<div class="card"><div class="muted">Manifiesto actual</div><b>${esc(S.file?.name || '—')}</b>
-      <div class="muted">Subido ${fmtDate(S.file?.createdDateTime)} · carpeta “${esc(S.folder?.name)}”</div>
-      <button class="btn primary" data-act="upload">⬆ Subir manifiesto nuevo</button>
-      <p class="muted">Al subir uno nuevo (desde aquí o directo a la carpeta de OneDrive), el anterior se mueve solo a “${CONFIG.historyFolder}”.</p>
-      <button class="btn" data-act="refresh">↻ Revisar carpeta ahora</button>
-      ${S.file?.webUrl ? `<a class="btn" href="${esc(S.file.webUrl)}" target="_blank" rel="noopener">Abrir en Excel</a>` : ''}
-      <button class="btn" data-act="csv">⬇ Reporte CSV</button></div>
+  openSheet(head + (S.history ? `<p class="muted">Consultando el Historial.</p><button class="btn primary" data-act="current">Volver a los activos</button>` : '') + `
+      <p class="muted">Todos los Excel de la carpeta “${esc(S.folder?.name)}” están <b>activos a la vez</b>, aunque tengan formatos distintos. Un manifiesto pasa solo a “${CONFIG.historyFolder}” cuando salen todos sus vehículos, o con el botón Archivar.</p>
+      ${S.files.map(card).join('')}
+      ${S.history ? '' : `<button class="btn primary" data-act="upload">⬆ Subir otro manifiesto</button>
+      <button class="btn" data-act="refresh">↻ Revisar carpeta ahora</button>`}
+      <button class="btn" data-act="csv">⬇ Reporte CSV</button>
       <div class="sec">${CONFIG.historyFolder}</div><div id="histList" class="muted"><span class="spinner"></span>Cargando…</div>`);
   try{
     const items = S.hist ? (await listChildren(S.folder.driveId, S.hist.id)).filter(isXlsx).sort(byNewest) : [];
@@ -1095,7 +1245,7 @@ function saveSettings(){
 
 function openDetail(e){
   openSheet(`<h3>Detalle <button data-act="close">✕</button></h3>
-    <div class="card"><div class="vin big">${esc(e.vin)}</div><div class="muted">Hoja ${esc(e.sheet)} · Fila ${e.row} · <b>${e.exited ? 'SALIÓ' : e.found ? 'EN ALMACÉN' : 'POR LLEGAR'}</b></div>
+    <div class="card"><div class="vin big">${esc(e.vin)}</div><div class="muted">${esc(e.brand)} · ${esc(e.model)}</div><div class="muted">📄 ${esc(shortName(e.fileName))} · Hoja ${esc(e.sheet)} · Fila ${e.row} · <b>${e.exited ? 'SALIÓ' : e.found ? 'EN ALMACÉN' : 'POR LLEGAR'}</b></div>
     ${timesHtml(e)}
     <dl class="fields">${rowFields(e).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl></div>
     ${!e.found ? `<button class="btn primary" data-do="in" data-id="${esc(e.id)}">⬇ Registrar INGRESO ahora</button>` : ''}
@@ -1268,13 +1418,14 @@ $('#scOcr').onclick = () => Scan.ocr();
 $('#scTorch').onclick = () => Scan.torch();
 $('#manual').onsubmit = ev => { ev.preventDefault(); const v = $('#q').value; if(normVin(v).length < 4) return toast('Escribe al menos 4 caracteres'); handleRead(v, 'manual'); $('#q').select(); };
 $('#filter').oninput = () => renderList();
+$('#fileFilter').onchange = ev => { S.filter = ev.target.value; $('#result').classList.add('hidden'); renderAll(); };
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b)); renderList(); });
 $('#list').onclick = ev => { const li = ev.target.closest('li[data-id]'); if(li){ const e = S.entries.find(x => x.id === li.dataset.id); if(e) openDetail(e); } };
 $('#fileChip').onclick = () => openFiles();
 $('#btnSettings').onclick = () => openSettings();
 $('#btnLocal').onclick = () => $('#fileLocal').click();
 $('#btnLogin').onclick = () => login();
-$('#fileLocal').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; if(f){ closeSheet(); openLocal(f); } };
+$('#fileLocal').onchange = ev => { const fl = [...ev.target.files]; ev.target.value = ''; if(fl.length){ closeSheet(); openLocal(fl); } };
 $('#fileUpload').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; if(f){ closeSheet(); uploadManifest(f); } };
 $('#sheet').onclick = ev => { if(ev.target.id === 'sheet') closeSheet(); };
 document.addEventListener('click', async ev => {
@@ -1291,14 +1442,22 @@ document.addEventListener('click', async ev => {
     else if(d === 'undoout'){ undoOut(e); $('#result').classList.add('hidden'); toast('Salida anulada: ' + e.vin); }
     renderAll(); return;
   }
-  if(t.dataset.hist){ closeSheet(); try{ await loadGraphFile({ id: t.dataset.hist }, { driveId: S.folder.driveId, history: true }); } catch(e){ errorScreen(e); } return; }
+  if(t.dataset.hist){ closeSheet(); try{ await openHistory(t.dataset.hist); } catch(e){ errorScreen(e); } return; }
   const a = t.dataset.act;
   if(a === 'close') closeSheet();
   else if(a === 'upload') $('#fileUpload').click();
   else if(a === 'refresh'){ closeSheet(); try{ await refreshFolder(); } catch(e){ errorScreen(e); } }
-  else if(a === 'current'){ banner(''); S.file && (S.file.history = false); S.file = null; try{ await refreshFolder({ initial: true }); } catch(e){ errorScreen(e); } }
-  else if(a === 'download'){ closeSheet(); downloadMarked(); }
+  else if(a === 'current'){ closeSheet(); banner(''); S.history = null; S.files = []; rebuild(); try{ await refreshFolder({ initial: true }); } catch(e){ errorScreen(e); } }
+  else if(a === 'download'){ closeSheet(); const f = S.fileMap[t.dataset.id]; if(f) downloadMarked(f); }
+  else if(a === 'closelocal'){ closeSheet(); const f = S.fileMap[t.dataset.id]; if(f) closeLocal(f); }
+  else if(a === 'archive'){
+    const f = S.fileMap[t.dataset.id]; if(!f) return;
+    const pend = f.entries.filter(e => !e.exited).length;
+    if(!confirm(`¿Archivar ${f.name}?` + (pend ? `\n\nTodavía tiene ${pend} vehículo(s) sin salida. Seguirá guardado en ${CONFIG.historyFolder}.` : ''))) return;
+    closeSheet(); try{ await archiveFile(f); } catch(e){ toast('No se pudo archivar: ' + e.message, 5000); }
+  }
   else if(a === 'csv'){ closeSheet(); exportCsv(); }
+  else if(a === 'sumcsv'){ exportSummaryCsv(); }
   else if(a === 'local'){ $('#fileLocal').click(); }
   else if(a === 'login'){ closeSheet(); login(); }
   else if(a === 'saveCfg') saveSettings();
@@ -1333,8 +1492,9 @@ async function startGraph(){
       if(S.account && mode !== 'local') return await startGraph();
     }
     if(mode === 'local'){
-      const last = await idb.get('lastLocal');
-      if(last) return await openLocal({ name: last.name, size: last.buf.byteLength }, last.buf);
+      let list = await idb.get('localFiles');
+      if(!list || !list.length){ const last = await idb.get('lastLocal'); list = last ? [last] : []; }   // versión anterior
+      if(list.length) return await openLocal(list, true);
     }
     show('welcome');
     if(!cfg.clientId) $('#loginHint').classList.remove('hidden');
