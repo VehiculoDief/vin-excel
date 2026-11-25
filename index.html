@@ -1,0 +1,1054 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b5cab">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<link rel="apple-touch-icon" href="icon.svg">
+<title>Escáner VIN</title>
+<style>
+:root{
+  --bg:#f3f5f8; --card:#fff; --ink:#0f172a; --muted:#5b6474; --line:#dde2ea;
+  --brand:#0b5cab; --brand-ink:#fff;
+  --ok:#14833b; --ok-bg:#e3f6e9; --warn:#a15c00; --warn-bg:#fff2dc; --bad:#c0262d; --bad-bg:#fde6e7;
+  --radius:14px;
+}
+@media (prefers-color-scheme:dark){
+  :root{ --bg:#0d1117; --card:#161b22; --ink:#e6edf3; --muted:#9aa5b1; --line:#2b333d;
+    --brand:#3b8eea; --ok:#3fb950; --ok-bg:#10281a; --warn:#e3a33b; --warn-bg:#2c2110; --bad:#f85149; --bad-bg:#2d1214; }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-tap-highlight-color:transparent}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+.hidden{display:none!important}
+header.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:8px;padding:10px 16px;padding-top:max(10px,env(safe-area-inset-top));background:var(--brand);color:var(--brand-ink)}
+.brand{font-weight:800;letter-spacing:.5px;white-space:nowrap}
+.chip{flex:1;min-width:0;background:rgba(255,255,255,.16);border:0;border-radius:999px;padding:6px 12px;color:#fff;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}
+.icon{background:transparent;border:0;color:#fff;font-size:22px;padding:2px 6px}
+.dot{width:10px;height:10px;border-radius:50%;background:#9ca3af;flex:none}
+.dot.ok{background:#4ade80}.dot.busy{background:#facc15;animation:pulse 1s infinite}.dot.err{background:#f87171}
+@keyframes pulse{50%{opacity:.35}}
+main{max-width:720px;margin:0 auto;padding:16px;padding-bottom:40px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px}
+h2{margin:0 0 8px;font-size:20px}
+p.muted,.muted{color:var(--muted);font-size:14px}
+.btn{display:block;width:100%;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:13px 14px;margin-top:10px;font-weight:600;text-align:center}
+.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.btn.danger{color:var(--bad)}
+.btn.sm{display:inline-block;width:auto;padding:8px 12px;margin:6px 6px 0 0;font-size:14px}
+.progress .pnums{font-size:30px;font-weight:800}
+.progress .pnums small{font-size:15px;font-weight:500;color:var(--muted)}
+.bar{height:10px;background:var(--line);border-radius:99px;overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;width:0;background:var(--ok);transition:width .3s}
+.scan{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;border:0;border-radius:18px;padding:22px;background:var(--brand);color:#fff;font-size:22px;font-weight:800;box-shadow:0 6px 18px rgba(11,92,171,.3);margin-bottom:14px}
+.manual{display:flex;gap:8px;margin-bottom:14px}
+.manual input{flex:1;min-width:0;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:12px;text-transform:uppercase;font-family:ui-monospace,Consolas,monospace;letter-spacing:1px}
+.manual button{border:0;border-radius:12px;padding:0 18px;background:var(--ink);color:var(--bg);font-weight:700}
+.result{border-width:2px}
+.result.ok{border-color:var(--ok);background:var(--ok-bg)}
+.result.warn{border-color:var(--warn);background:var(--warn-bg)}
+.result.bad{border-color:var(--bad);background:var(--bad-bg)}
+.result .st{font-weight:800;font-size:18px}
+.result.ok .st{color:var(--ok)}.result.warn .st{color:var(--warn)}.result.bad .st{color:var(--bad)}
+.vin{font-family:ui-monospace,Consolas,monospace;font-weight:700;letter-spacing:1px;word-break:break-all}
+.vin.big{font-size:21px;margin:4px 0}
+.vin b.diff{color:var(--bad);text-decoration:underline}
+dl.fields{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:10px 0 0;font-size:14px}
+dl.fields dt{color:var(--muted)} dl.fields dd{margin:0;word-break:break-word}
+.tabs{display:flex;gap:6px;margin:4px 0 10px;overflow-x:auto}
+.tabs button{flex:1;white-space:nowrap;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:9px 8px;font-size:14px;font-weight:600}
+.tabs button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+input.filter{width:100%;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px 12px;margin-bottom:10px}
+ul.list{list-style:none;margin:0;padding:0}
+ul.list li{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px}
+ul.list li .grow{flex:1;min-width:0}
+ul.list li .meta{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ul.list li.found{border-left:6px solid var(--ok)}
+ul.list li.extra{border-left:6px solid var(--bad)}
+.badge{font-size:12px;font-weight:700;padding:3px 8px;border-radius:99px;background:var(--line);white-space:nowrap}
+.badge.ok{background:var(--ok-bg);color:var(--ok)}
+/* Scanner */
+.scanner{position:fixed;inset:0;z-index:20;background:#000;color:#fff}
+.scanner video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.guide{position:absolute;left:6%;right:6%;top:38%;height:18%;border:3px solid rgba(255,255,255,.9);border-radius:12px;box-shadow:0 0 0 100vmax rgba(0,0,0,.45);transition:border-color .2s}
+.guide.ok{border-color:#4ade80}.guide.bad{border-color:#f87171}.guide.warn{border-color:#facc15}
+.guide i{position:absolute;left:4%;right:4%;top:50%;height:2px;background:rgba(248,113,113,.85);animation:scanline 1.6s ease-in-out infinite}
+@keyframes scanline{0%,100%{transform:translateY(-30px)}50%{transform:translateY(30px)}}
+.sc-top{position:absolute;top:0;left:0;right:0;display:flex;gap:8px;align-items:center;padding:12px;padding-top:max(12px,env(safe-area-inset-top))}
+.sc-top .lbl{flex:1;font-size:14px;opacity:.9}
+.round{width:46px;height:46px;border-radius:50%;border:0;background:rgba(0,0,0,.55);color:#fff;font-size:20px}
+.round.on{background:#facc15;color:#000}
+.sc-msg{position:absolute;left:12px;right:12px;top:calc(56% + 16px);text-align:center;font-size:16px}
+.sc-msg .pill{display:inline-block;max-width:100%;padding:10px 14px;border-radius:12px;background:rgba(0,0,0,.65)}
+.sc-msg .pill.ok{background:#14833b}.sc-msg .pill.bad{background:#c0262d}.sc-msg .pill.warn{background:#a15c00}
+.sc-bottom{position:absolute;left:0;right:0;bottom:0;display:flex;gap:10px;padding:16px;padding-bottom:max(16px,env(safe-area-inset-bottom))}
+.sc-bottom button{flex:1;border:0;border-radius:14px;padding:16px;font-weight:700;font-size:16px;background:rgba(255,255,255,.92);color:#000}
+.sc-bottom button.alt{background:rgba(0,0,0,.6);color:#fff;border:1px solid rgba(255,255,255,.4)}
+.flash{position:fixed;inset:0;z-index:30;pointer-events:none;opacity:0;transition:opacity .35s}
+.flash.ok{background:rgba(34,197,94,.45);opacity:1}.flash.bad{background:rgba(239,68,68,.45);opacity:1}.flash.warn{background:rgba(250,204,21,.45);opacity:1}
+/* Sheet */
+.sheet{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center}
+.sheet-body{width:100%;max-width:720px;max-height:88vh;overflow:auto;background:var(--bg);border-radius:18px 18px 0 0;padding:18px 16px;padding-bottom:max(18px,env(safe-area-inset-bottom))}
+.sheet-body h3{margin:0 0 10px;font-size:19px;display:flex;justify-content:space-between;align-items:center}
+.sheet-body h3 button{border:0;background:transparent;font-size:22px}
+label.f{display:block;margin:12px 0 4px;font-weight:600;font-size:14px}
+input.t{width:100%;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px 12px}
+.row{display:flex;gap:10px;align-items:center}
+.sec{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:18px 0 6px;font-weight:700}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:50;background:#111827;color:#fff;padding:12px 16px;border-radius:12px;max-width:calc(100% - 32px);font-size:15px;opacity:0;transition:opacity .25s;pointer-events:none}
+#toast.show{opacity:1}
+.banner{background:var(--warn-bg);border:1px solid var(--warn);color:var(--ink);border-radius:12px;padding:10px 12px;margin-bottom:14px;font-size:14px}
+.spinner{display:inline-block;width:18px;height:18px;border:3px solid var(--line);border-top-color:var(--brand);border-radius:50%;animation:spin 1s linear infinite;vertical-align:middle;margin-right:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">VIN✓</div>
+  <button id="fileChip" class="chip">Sin archivo</button>
+  <span id="sync" class="dot" title="Sincronización"></span>
+  <button id="btnSettings" class="icon" aria-label="Ajustes">⚙</button>
+</header>
+
+<main>
+  <div id="banner" class="banner hidden"></div>
+
+  <section id="loading" class="card"><span class="spinner"></span><span id="loadingTxt">Cargando…</span></section>
+
+  <section id="welcome" class="card hidden">
+    <h2>Escáner de VIN</h2>
+    <p class="muted">Escanea el VIN con la cámara y la app sombrea la fila del manifiesto donde aparece.</p>
+    <button id="btnLogin" class="btn primary">Entrar con Microsoft 365 (OneDrive)</button>
+    <p id="loginHint" class="muted hidden">Para usar OneDrive primero configura el <b>Client ID</b> en ⚙ Ajustes (ver LEEME).</p>
+    <button id="btnLocal" class="btn">Abrir Excel desde este teléfono</button>
+    <p class="muted">Modo teléfono: trabaja sin internet y al final descargas el Excel con las filas sombreadas.</p>
+  </section>
+
+  <section id="empty" class="card hidden">
+    <h2>Carpeta sin manifiesto</h2>
+    <p class="muted">No hay ningún .xlsx en la carpeta <b id="emptyFolder"></b>. Súbelo desde aquí o desde OneDrive.</p>
+    <button class="btn primary" data-act="upload">Subir manifiesto</button>
+    <button class="btn" data-act="refresh">Volver a revisar</button>
+  </section>
+
+  <section id="work" class="hidden">
+    <div class="card progress">
+      <div class="pnums"><span id="cFound">0</span> / <span id="cTotal">0</span> <small>VIN encontrados</small></div>
+      <div class="bar"><i id="barFill"></i></div>
+      <div id="cSub" class="muted" style="margin-top:6px"></div>
+    </div>
+    <button id="btnScan" class="scan">📷 Escanear VIN</button>
+    <form id="manual" class="manual" autocomplete="off">
+      <input id="q" placeholder="VIN o últimos dígitos" autocapitalize="characters" spellcheck="false" inputmode="text">
+      <button type="submit">Buscar</button>
+    </form>
+    <div id="result" class="card result hidden"></div>
+    <div class="tabs">
+      <button data-tab="pend" class="on">Pendientes <span id="nPend"></span></button>
+      <button data-tab="found">Encontrados <span id="nFound"></span></button>
+      <button data-tab="extra">No listados <span id="nExtra"></span></button>
+    </div>
+    <input id="filter" class="filter" placeholder="Filtrar lista…" autocomplete="off">
+    <ul id="list" class="list"></ul>
+    <p id="listMore" class="muted"></p>
+  </section>
+</main>
+
+<div id="scanner" class="scanner hidden">
+  <video id="video" playsinline muted autoplay></video>
+  <div id="guide" class="guide"><i></i></div>
+  <div class="sc-top">
+    <button id="scClose" class="round" aria-label="Cerrar">✕</button>
+    <div class="lbl" id="scLbl">Apunta al código de barras del VIN</div>
+    <button id="scTorch" class="round hidden" aria-label="Linterna">🔦</button>
+  </div>
+  <div class="sc-msg" id="scMsg"></div>
+  <div class="sc-bottom">
+    <button id="scOcr">🔤 Leer VIN impreso</button>
+    <button id="scDone" class="alt">Listo</button>
+  </div>
+</div>
+
+<div id="flash" class="flash"></div>
+<div id="sheet" class="sheet hidden"><div class="sheet-body" id="sheetBody"></div></div>
+<div id="toast"></div>
+<input type="file" id="fileLocal" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
+<input type="file" id="fileUpload" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
+
+<script>
+/* =====================================================================
+   CONFIGURACIÓN — se puede dejar vacío y llenar desde ⚙ Ajustes
+   ===================================================================== */
+const CONFIG = {
+  clientId: '',                 // Id. de aplicación (cliente) de Azure / Entra ID
+  tenant: 'organizations',      // o el Id. de inquilino de Supervan
+  // carpeta donde se suben los manifiestos (OneDrive de supervisor@dief.pe, compartida con el equipo)
+  folder: 'https://supervanperu-my.sharepoint.com/personal/supervisor_dief_pe/Documents/Respaldo de Balanza 2025/Vehiculos',
+  historyFolder: 'Historial',
+  pollSeconds: 45
+};
+
+const LIB = {
+  msal: 'https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js',
+  exceljs: 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js',
+  zxing: 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js',
+  tesseract: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'
+};
+const SCOPES = ['User.Read', 'Files.ReadWrite.All', 'Sites.Read.All'];
+const GRAPH = 'https://graph.microsoft.com/v1.0';
+const VIN17 = /^[A-HJ-NPR-Z0-9]{17}$/;
+const MARK_HEADER = 'ESCANEO';
+
+/* ------------------------------ utilidades ------------------------------ */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); }catch{ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} }
+};
+const loaded = {};
+function loadScript(src){
+  if(!loaded[src]) loaded[src] = new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = src; s.onload = res;
+    s.onerror = () => { delete loaded[src]; rej(new Error('No se pudo cargar ' + src.split('/')[2] + '. ¿Hay internet?')); };
+    document.head.appendChild(s);
+  });
+  return loaded[src];
+}
+function colLetter(n){ let s=''; while(n>0){ const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26); } return s; }
+function normVin(s){ return String(s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+function nowTxt(d = new Date()){ return d.toLocaleString('es-PE', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }
+let toastT;
+function toast(msg, ms = 2600){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'), ms); }
+function setSync(s, title=''){ const d=$('#sync'); d.className='dot '+s; d.title=title; }
+function show(id){ ['loading','welcome','empty','work'].forEach(x => $('#'+x).classList.toggle('hidden', x!==id)); }
+function loading(txt){ $('#loadingTxt').textContent = txt; show('loading'); }
+function banner(html){ const b=$('#banner'); b.innerHTML=html||''; b.classList.toggle('hidden', !html); }
+
+/* Dígito verificador (norma NA, informativo) */
+function vinCheckOk(v){
+  if(!VIN17.test(v)) return false;
+  const tr = {A:1,B:2,C:3,D:4,E:5,F:6,G:7,H:8,J:1,K:2,L:3,M:4,N:5,P:7,R:9,S:2,T:3,U:4,V:5,W:6,X:7,Y:8,Z:9};
+  const w = [8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2];
+  let sum = 0; for(let i=0;i<17;i++){ const c=v[i]; sum += (/\d/.test(c)?+c:tr[c]) * w[i]; }
+  const r = sum % 11; return v[8] === (r===10 ? 'X' : String(r));
+}
+
+/* IndexedDB mínimo (para recuperar el archivo local si el teléfono recarga) */
+const idb = {
+  db(){ return this._d || (this._d = new Promise((res, rej) => { const r = indexedDB.open('vinapp', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); })); },
+  async get(k){ try{ const db = await this.db(); return await new Promise(res => { const q = db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(undefined); }); }catch{ return undefined; } },
+  async set(k, v){ try{ const db = await this.db(); await new Promise(res => { const t = db.transaction('kv','readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = res; }); }catch{} },
+  async del(k){ try{ const db = await this.db(); db.transaction('kv','readwrite').objectStore('kv').delete(k); }catch{} }
+};
+
+/* ------------------------------ estado ------------------------------ */
+const cfg = Object.assign({ clientId: CONFIG.clientId, tenant: CONFIG.tenant, folder: CONFIG.folder,
+  color: '#92D050', marker: false, sound: true, operator: '' }, store.get('vin_cfg', {}));
+const S = {
+  mode: null,          // 'graph' | 'local'
+  account: null,
+  folder: null,        // {driveId, id, name, webUrl}
+  hist: null,
+  file: null,          // {id, driveId, name, cTag, webUrl, createdDateTime, history:boolean} | {name, size, local:true}
+  wb: null, sheets: {}, entries: [], index: new Map(), vin17: [],
+  extras: [], tab: 'pend', queue: store.get('vin_queue', []), busyReload: false
+};
+
+/* =====================================================================
+   LECTURA DEL EXCEL
+   ===================================================================== */
+function cellText(c){
+  const v = c.value;
+  if(v == null) return '';
+  if(v instanceof Date) return v.toLocaleDateString('es-PE');
+  if(typeof v === 'object'){
+    if(v.richText) return v.richText.map(t => t.text).join('');
+    if('result' in v) return v.result == null ? '' : (v.result instanceof Date ? v.result.toLocaleDateString('es-PE') : String(v.result));
+    if(v.text != null) return String(v.text);
+    if(v.error) return '';
+  }
+  return String(v);
+}
+function fillHex(c){
+  const f = c.fill;
+  if(f && f.type === 'pattern' && f.pattern && f.pattern !== 'none' && f.fgColor && f.fgColor.argb) return f.fgColor.argb.slice(-6).toUpperCase();
+  return '';
+}
+function headerScore(t){
+  const u = t.toUpperCase();
+  if(!u || u.length > 40 || /MOTOR|ENGINE/.test(u)) return 0;
+  if(/\bVIN\b/.test(u)) return 3;
+  if(/CHAS+IS/.test(u)) return 2;
+  if(/\bSERIE\b|\bSERIAL\b/.test(u)) return 1;
+  return 0;
+}
+
+async function parseWorkbook(buf){
+  await loadScript(LIB.exceljs);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf);
+  const hex = cfg.color.replace('#','').toUpperCase();
+  const sheets = {}, entries = [];
+  for(const ws of wb.worksheets){
+    if(ws.state && ws.state !== 'visible') continue;
+    const rows = [];
+    let maxCol = 0;
+    ws.eachRow({includeEmpty:false}, (row, rn) => {
+      const vals = [];
+      row.eachCell({includeEmpty:false}, (c, cn) => { const t = cellText(c).trim(); if(t){ vals[cn] = t; if(cn > maxCol) maxCol = cn; } });
+      if(vals.length) rows.push({rn, vals, row});
+    });
+    if(!rows.length) continue;
+
+    // 1) buscar encabezado VIN / CHASIS / SERIE en las primeras filas
+    let headerRow = null, vinCol = 0, best = 0;
+    for(const r of rows.slice(0, 40)){
+      for(let c = 1; c < r.vals.length; c++){ const sc = headerScore(r.vals[c] || ''); if(sc > best){ best = sc; headerRow = r; vinCol = c; } }
+      if(best === 3) break;
+    }
+    // 2) si no hay encabezado, la columna con más valores con forma de VIN
+    if(!vinCol){
+      const cnt = {};
+      rows.forEach(r => r.vals.forEach((v, c) => { if(v && VIN17.test(normVin(v))) cnt[c] = (cnt[c]||0) + 1; }));
+      const bestCol = Object.keys(cnt).sort((a,b) => cnt[b]-cnt[a])[0];
+      if(!bestCol) continue;
+      vinCol = +bestCol;
+      const firstIdx = rows.findIndex(r => VIN17.test(normVin(r.vals[vinCol])));
+      const prev = rows[firstIdx - 1];
+      if(prev && prev.vals.filter(Boolean).length >= 2) headerRow = prev;
+    }
+    const headers = headerRow ? headerRow.vals : [];
+    let markerCol = 0;
+    headers.forEach((h, c) => { if(h && h.toUpperCase() === MARK_HEADER) markerCol = c; });
+    const lastCol = Math.max(headers.length - 1, maxCol, 1);
+    const sh = { name: ws.name, ws, headers, headerRow: headerRow ? headerRow.rn : 0, vinCol, lastCol, markerCol };
+    let n = 0;
+    for(const r of rows){
+      if(headerRow && r.rn <= headerRow.rn) continue;
+      const raw = r.vals[vinCol];
+      if(!raw || headerScore(raw)) continue;
+      const v = normVin(raw);
+      if(v.length < 6 || !/\d/.test(v)) continue;
+      const mk = markerCol ? (r.vals[markerCol] || '') : '';
+      const filled = fillHex(r.row.getCell(vinCol)) === hex;
+      entries.push({ id: ws.name + '!' + r.rn, vin: v, sheet: ws.name, row: r.rn, vals: r.vals,
+        found: filled || /^ESCANEAD/i.test(mk), foundAt: mk.replace(/^ESCANEADO\s*/i,''), wasFound: filled || /^ESCANEAD/i.test(mk) });
+      n++;
+    }
+    if(n) sheets[ws.name] = sh;
+  }
+  return { wb, sheets, entries };
+}
+
+function setData({wb, sheets, entries}){
+  S.wb = wb; S.sheets = sheets; S.entries = entries;
+  S.index = new Map();
+  for(const e of entries){ if(!S.index.has(e.vin)) S.index.set(e.vin, []); S.index.get(e.vin).push(e); }
+  S.vin17 = [...S.index.keys()].filter(v => v.length === 17);
+  // operaciones pendientes de subir (sin internet) siguen contando
+  for(const op of S.queue){ if(S.file && op.itemId === S.file.id){ const e = entries.find(x => x.sheet === op.sheet && x.row === op.row); if(e) e.found = op.type === 'mark'; } }
+}
+
+/* Resumen de una fila: campos útiles para mostrar */
+function rowFields(e, max = 99){
+  const sh = S.sheets[e.sheet]; const out = [];
+  const pref = /MARCA|MODELO|COLOR|DESCRIP|BL\b|B\/L|CONSIGN|CLIENTE|A[NÑ]O|UBIC|ZONA|DESTINO/i;
+  const cols = [];
+  e.vals.forEach((v, c) => { if(v && c !== sh.vinCol && c !== sh.markerCol) cols.push(c); });
+  cols.sort((a, b) => (pref.test(sh.headers[b]||'') ? 1 : 0) - (pref.test(sh.headers[a]||'') ? 1 : 0));
+  for(const c of cols.slice(0, max)) out.push([sh.headers[c] || ('Col ' + colLetter(c)), e.vals[c]]);
+  return out;
+}
+function rowSummary(e){ return rowFields(e, 3).map(f => f[1]).join(' · '); }
+
+/* =====================================================================
+   MICROSOFT 365 / ONEDRIVE (Graph)
+   ===================================================================== */
+let msalApp = null;
+async function initMsal(){
+  await loadScript(LIB.msal);
+  msalApp = new msal.PublicClientApplication({
+    auth: { clientId: cfg.clientId, authority: 'https://login.microsoftonline.com/' + (cfg.tenant || 'organizations'), redirectUri: location.origin + location.pathname },
+    cache: { cacheLocation: 'localStorage' }
+  });
+  if(msalApp.initialize) await msalApp.initialize();
+  const res = await msalApp.handleRedirectPromise();
+  S.account = (res && res.account) || msalApp.getAllAccounts()[0] || null;
+  if(S.account) msalApp.setActiveAccount(S.account);
+}
+async function token(){
+  try{ return (await msalApp.acquireTokenSilent({ scopes: SCOPES, account: S.account })).accessToken; }
+  catch(e){ await msalApp.acquireTokenRedirect({ scopes: SCOPES, account: S.account }); throw new Error('Reautenticando…'); }
+}
+async function gfetch(path, opts = {}){
+  const headers = Object.assign({ Authorization: 'Bearer ' + await token() }, opts.headers || {});
+  if(opts.json !== undefined){ headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(opts.json); }
+  const r = await fetch(path.startsWith('http') ? path : GRAPH + path, { method: opts.method || 'GET', headers, body: opts.body });
+  if(!r.ok){ let m = r.status + ''; try{ const j = await r.json(); m += ' ' + (j.error?.message || ''); }catch{} const err = new Error(m); err.status = r.status; throw err; }
+  if(r.status === 204) return null;
+  const ct = r.headers.get('content-type') || '';
+  return ct.includes('json') ? r.json() : r.text();
+}
+const shareId = url => 'u!' + btoa(unescape(encodeURIComponent(url))).replace(/=+$/,'').replace(/\//g,'_').replace(/\+/g,'-');
+const encPath = p => p.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+
+async function resolveFolder(){
+  const f = (cfg.folder || CONFIG.folder).trim();
+  let it;
+  if(/^https?:\/\//i.test(f)){
+    // acepta: enlace "Compartir", URL directa de la carpeta o URL de un .xlsx dentro de ella
+    let url = f.split('?')[0].split('#')[0];
+    try{ url = decodeURIComponent(url); }catch{}
+    if(/\.xlsx$/i.test(url)) url = url.replace(/\/[^/]+$/, '');
+    const isShareLink = /\/:[a-z]:\//i.test(f);
+    try{ it = await gfetch('/shares/' + shareId(isShareLink ? f : encodeURI(url)) + '/driveItem'); }
+    catch(e){ it = null; }
+    if(it && !it.folder && it.parentReference?.id) it = await gfetch(`/drives/${it.parentReference.driveId}/items/${it.parentReference.id}`);
+    if(!it || !it.folder){
+      // URL directa: https://host/personal/usuario/Documents/ruta  o  https://host/sites/sitio/Biblioteca/ruta
+      const m = url.match(/^https:\/\/([^/]+)\/(personal|sites|teams)\/([^/]+)\/([^/]+)\/?(.*)$/i);
+      if(!m) throw new Error('No pude abrir el enlace de la carpeta. Usa el enlace "Compartir" de la carpeta.');
+      const [, host, kind, site, lib, path] = m;
+      const st = await gfetch(`/sites/${host}:/${kind}/${site}`);
+      const drives = (await gfetch(`/sites/${st.id}/drives`)).value;
+      const drv = drives.find(d => decodeURIComponent((d.webUrl || '').split('/').pop()).toLowerCase() === lib.toLowerCase()) || drives[0];
+      it = await gfetch(`/drives/${drv.id}/root` + (path ? ':/' + encPath(path) : ''));
+    }
+  } else {
+    try{ it = await gfetch('/me/drive/root:/' + encPath(f)); }
+    catch(e){
+      if(e.status !== 404) throw e;
+      const parts = f.split('/').filter(Boolean); const name = parts.pop();
+      const parent = parts.length ? '/me/drive/root:/' + encPath(parts.join('/')) + ':/children' : '/me/drive/root/children';
+      it = await gfetch(parent, { method:'POST', json:{ name, folder:{}, '@microsoft.graph.conflictBehavior':'fail' } });
+    }
+  }
+  if(!it.folder) throw new Error('La ruta configurada no es una carpeta.');
+  return { driveId: it.parentReference?.driveId || it.remoteItem?.parentReference?.driveId, id: it.id, name: it.name, webUrl: it.webUrl };
+}
+async function listChildren(driveId, id){
+  let url = `/drives/${driveId}/items/${id}/children?$top=200`; const all = [];
+  while(url){ const j = await gfetch(url); all.push(...j.value); url = j['@odata.nextLink'] || null; }
+  return all;
+}
+const isXlsx = it => it.file && /\.xlsx$/i.test(it.name) && !it.name.startsWith('~$');
+const byNewest = (a, b) => new Date(b.createdDateTime) - new Date(a.createdDateTime);
+
+/* Revisa la carpeta: el .xlsx más nuevo es el activo, los anteriores pasan a Historial */
+async function refreshFolder({ initial = false } = {}){
+  setSync('busy', 'Revisando carpeta…');
+  const F = S.folder;
+  const kids = await listChildren(F.driveId, F.id);
+  let hist = kids.find(k => k.folder && k.name.toLowerCase() === CONFIG.historyFolder.toLowerCase());
+  const files = kids.filter(isXlsx).sort(byNewest);
+  if(!files.length){
+    if(!S.file || !S.file.history){ $('#emptyFolder').textContent = F.name; show('empty'); }
+    setSync('ok'); return;
+  }
+  const active = files[0];
+  if(files.length > 1){
+    if(!hist) hist = await gfetch(`/drives/${F.driveId}/items/${F.id}/children`, { method:'POST', json:{ name: CONFIG.historyFolder, folder:{}, '@microsoft.graph.conflictBehavior':'replace' } });
+    for(const old of files.slice(1)){
+      await gfetch(`/drives/${F.driveId}/items/${old.id}?@microsoft.graph.conflictBehavior=rename`, { method:'PATCH', json:{ parentReference:{ id: hist.id } } });
+    }
+    toast(`📁 ${files.length - 1} archivo(s) anterior(es) guardado(s) en ${CONFIG.historyFolder}`);
+  }
+  S.hist = hist || null;
+  if(S.file && S.file.history){
+    if(active.id !== S.file.activeId) banner(`Hay un manifiesto nuevo: <b>${esc(active.name)}</b>. <button class="btn sm" data-act="current">Abrir</button>`);
+    setSync('ok'); return;
+  }
+  if(!S.file || S.file.id !== active.id){
+    if(S.file && !initial){ toast('🆕 Nuevo manifiesto: ' + active.name, 4000); beep('new'); }
+    await loadGraphFile(active, { driveId: F.driveId });
+  } else if(active.cTag !== S.file.cTag && !S.queue.length){
+    await loadGraphFile(active, { driveId: F.driveId, quiet: true });
+  }
+  setSync('ok', 'Sincronizado ' + nowTxt());
+}
+
+async function loadGraphFile(item, { driveId, quiet = false, history = false } = {}){
+  if(!quiet) loading('Abriendo ' + item.name + '…');
+  setSync('busy', 'Descargando…');
+  const d = driveId || item.parentReference?.driveId;
+  const meta = await gfetch(`/drives/${d}/items/${item.id}`);
+  const buf = await (await fetch(meta['@microsoft.graph.downloadUrl'])).arrayBuffer();
+  const data = await parseWorkbook(buf);
+  const prevActive = S.file && !S.file.history ? S.file.id : (S.file && S.file.activeId);
+  S.file = { id: meta.id, driveId: d, name: meta.name, cTag: meta.cTag, webUrl: meta.webUrl, createdDateTime: meta.createdDateTime, history, activeId: history ? prevActive : meta.id };
+  S.extras = store.get('vin_extra_' + meta.id, []);
+  setData(data);
+  if(!history) banner('');
+  else banner(`Estás viendo un archivo del <b>Historial</b>. <button class="btn sm" data-act="current">Volver al actual</button>`);
+  afterLoad(quiet);
+  setSync('ok', 'Sincronizado ' + nowTxt());
+}
+
+/* Cola de escritura en el Excel de OneDrive (soporta pérdida de señal) */
+function saveQueue(){ store.set('vin_queue', S.queue); }
+let flushing = false;
+async function flushQueue(){
+  if(flushing || !S.queue.length || S.mode !== 'graph') return;
+  flushing = true; setSync('busy', 'Guardando en Excel…');
+  try{
+    while(S.queue.length){
+      const op = S.queue[0];
+      try{ await applyOp(op); S.queue.shift(); saveQueue(); }
+      catch(e){
+        if(!e.status || e.status === 429 || e.status >= 500 || e.status === 401){ setSync('err', 'Sin conexión, se reintentará'); setTimeout(flushQueue, 8000); return; }
+        S.queue.shift(); saveQueue(); toast('No se pudo marcar fila ' + op.row + ': ' + e.message, 5000);
+      }
+    }
+    setSync('ok', 'Guardado ' + nowTxt());
+  } finally { flushing = false; }
+}
+async function applyOp(op){
+  const ws = `/drives/${op.driveId}/items/${op.itemId}/workbook/worksheets('${encodeURIComponent(op.sheet.replace(/'/g,"''"))}')`;
+  const rng = a => `${ws}/range(address='${a}')`;
+  const addr = `A${op.row}:${colLetter(op.lastCol)}${op.row}`;
+  if(op.type === 'mark') await gfetch(rng(addr) + '/format/fill', { method:'PATCH', json:{ color: op.color } });
+  else await gfetch(rng(addr) + '/format/fill/clear', { method:'POST' });
+  if(op.markerCol){
+    if(op.headerRow) await gfetch(rng(colLetter(op.markerCol) + op.headerRow), { method:'PATCH', json:{ values:[[MARK_HEADER]] } });
+    await gfetch(rng(colLetter(op.markerCol) + op.row), { method:'PATCH', json:{ values:[[op.type === 'mark' ? op.text : '']] } });
+  }
+}
+
+async function uploadManifest(file){
+  if(!/\.xlsx$/i.test(file.name)) return toast('Debe ser un archivo .xlsx');
+  const F = S.folder; loading('Subiendo ' + file.name + '…');
+  try{
+    const path = `/drives/${F.driveId}/items/${F.id}:/${encodeURIComponent(file.name)}:`;
+    if(file.size < 4e6){
+      await gfetch(path + '/content', { method:'PUT', body: file, headers:{ 'Content-Type': 'application/octet-stream' } });
+    } else {
+      const ses = await gfetch(path + '/createUploadSession', { method:'POST', json:{ item:{ '@microsoft.graph.conflictBehavior':'rename' } } });
+      const CH = 320 * 1024 * 10;
+      for(let o = 0; o < file.size; o += CH){
+        const end = Math.min(o + CH, file.size);
+        const r = await fetch(ses.uploadUrl, { method:'PUT', headers:{ 'Content-Range': `bytes ${o}-${end-1}/${file.size}` }, body: file.slice(o, end) });
+        if(!r.ok && r.status !== 202) throw new Error('Error al subir (' + r.status + ')');
+      }
+    }
+    toast('✅ Manifiesto subido');
+    if(S.file) S.file.history = false;
+    S.file = null;
+    await refreshFolder();
+  } catch(e){ errorScreen(e); }
+}
+
+/* =====================================================================
+   MODO LOCAL (archivo en el teléfono)
+   ===================================================================== */
+async function openLocal(file, buf){
+  loading('Leyendo ' + file.name + '…');
+  try{
+    buf = buf || await file.arrayBuffer();
+    const data = await parseWorkbook(buf);
+    S.mode = 'local';
+    S.file = { name: file.name, size: file.size || buf.byteLength, local: true };
+    S.file.id = 'local_' + S.file.name + '_' + S.file.size;
+    setData(data);
+    const saved = store.get('vin_local_' + S.file.id, {});
+    for(const e of S.entries){ if(saved[e.id]){ e.found = true; e.foundAt = saved[e.id]; } else if(saved[e.id] === 0){ e.found = false; } }
+    S.extras = store.get('vin_extra_' + S.file.id, []);
+    await idb.set('lastLocal', { name: file.name, buf });
+    store.set('vin_mode', 'local');
+    banner(''); afterLoad();
+  } catch(e){ errorScreen(e); }
+}
+function saveLocal(){
+  const m = {};
+  for(const e of S.entries){ if(e.found) m[e.id] = e.foundAt || '✓'; else if(e.wasFound) m[e.id] = 0; }
+  store.set('vin_local_' + S.file.id, m);
+}
+async function downloadMarked(){
+  const hex = 'FF' + cfg.color.replace('#','').toUpperCase();
+  for(const e of S.entries){
+    const sh = S.sheets[e.sheet]; const row = sh.ws.getRow(e.row);
+    if(e.found !== e.wasFound || e.found){
+      for(let c = 1; c <= sh.lastCol; c++){
+        const cell = row.getCell(c);
+        cell.fill = e.found ? { type:'pattern', pattern:'solid', fgColor:{ argb: hex } } : { type:'pattern', pattern:'none' };
+      }
+    }
+  }
+  const out = await S.wb.xlsx.writeBuffer();
+  saveBlob(new Blob([out], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), S.file.name.replace(/\.xlsx$/i, '') + ' - ESCANEADO.xlsx');
+}
+function saveBlob(blob, name){ const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500); }
+function exportCsv(){
+  const q = v => '"' + String(v ?? '').replace(/"/g,'""') + '"';
+  const lines = [['VIN','Estado','Hoja','Fila','Fecha/hora','Detalle'].map(q).join(';')];
+  for(const e of S.entries) lines.push([e.vin, e.found ? 'ENCONTRADO' : 'PENDIENTE', e.sheet, e.row, e.foundAt || '', rowSummary(e)].map(q).join(';'));
+  for(const x of S.extras) lines.push([x.vin, 'NO EN MANIFIESTO', '', '', x.at, x.src].map(q).join(';'));
+  saveBlob(new Blob(['﻿' + lines.join('\r\n')], { type:'text/csv;charset=utf-8' }), 'Reporte VIN - ' + S.file.name.replace(/\.xlsx$/i,'') + '.csv');
+}
+
+/* =====================================================================
+   BÚSQUEDA Y MARCADO
+   ===================================================================== */
+function hamming(a, b, max){ let d = 0; for(let i = 0; i < 17; i++){ if(a[i] !== b[i] && ++d > max) return d; } return d; }
+function fuzzy(v, max){
+  if(v.length !== 17) return [];
+  let best = max + 1, out = [];
+  for(const k of S.vin17){ const d = hamming(v, k, best); if(d < best){ best = d; out = [k]; } else if(d === best) out.push(k); }
+  return best <= max && out.length <= 3 ? out : [];
+}
+/* Candidatos de VIN a partir de texto de código de barras u OCR */
+function candidates(raw, ocr){
+  let s = normVin(raw);
+  if(ocr) s = s.replace(/O/g,'0').replace(/Q/g,'0').replace(/I/g,'1');
+  const out = new Set();
+  if(s.length === 18 && /^[IA]/.test(s)) out.add(s.slice(1)); // prefijo de importación en etiquetas
+  out.add(s);
+  if(s.length > 17) for(let i = 0; i + 17 <= s.length; i++) out.add(s.slice(i, i + 17));
+  return [...out];
+}
+
+function markEntries(list, source){
+  const fresh = list.filter(e => !e.found);
+  if(!fresh.length) return 'dup';
+  const at = nowTxt();
+  const who = (S.mode === 'graph' && S.account) ? (S.account.name || S.account.username) : cfg.operator;
+  for(const e of fresh){
+    e.found = true; e.foundAt = at + (who ? ' ' + who : '');
+    if(S.mode === 'graph') queueOp('mark', e);
+  }
+  if(S.mode === 'local') saveLocal();
+  return 'ok';
+}
+function unmark(e){
+  e.found = false; e.foundAt = '';
+  if(S.mode === 'graph') queueOp('unmark', e); else saveLocal();
+  renderAll(); toast('Marca quitada: ' + e.vin);
+}
+function queueOp(type, e){
+  const sh = S.sheets[e.sheet];
+  const op = { type, itemId: S.file.id, driveId: S.file.driveId, sheet: e.sheet, row: e.row, lastCol: sh.lastCol, color: cfg.color, text: 'ESCANEADO ' + e.foundAt };
+  if(cfg.marker){
+    if(!sh.markerCol){ sh.markerCol = sh.lastCol + 1; op.headerRow = sh.headerRow || 0; }
+    op.markerCol = sh.markerCol;
+  }
+  S.queue.push(op); saveQueue(); flushQueue();
+}
+function addExtra(vin, src){
+  if(!S.extras.some(x => x.vin === vin)){ S.extras.unshift({ vin, at: nowTxt(), src }); store.set('vin_extra_' + S.file.id, S.extras); }
+}
+
+let lastHit = { v:'', t:0 };
+/* Punto central: procesa un texto leído (código de barras, OCR o teclado) */
+function lookup(raw, source){
+  if(!S.entries.length) return { kind:'none' };
+  const ocr = source === 'ocr';
+  const cands = candidates(raw, ocr);
+  for(const c of cands){ if(S.index.has(c)){ const list = S.index.get(c); return { kind: markEntries(list, source), vin: c, list, source }; } }
+  const v17 = cands.find(c => VIN17.test(c));
+  const typed = normVin(raw);
+  if(source === 'manual' && typed.length >= 4 && typed.length < 17){
+    const m = S.entries.filter(e => e.vin.endsWith(typed));
+    const m2 = m.length ? m : S.entries.filter(e => e.vin.includes(typed));
+    return { kind:'partial', q: typed, list: m2.slice(0, 30), total: m2.length };
+  }
+  const target = v17 || typed;
+  const sugg = fuzzy(target, ocr ? 4 : 2);
+  if(source === 'barcode' && !v17 && !sugg.length) return { kind:'notvin', vin: typed };
+  return { kind:'notfound', vin: target, sugg, source };
+}
+
+function feedback(kind){
+  const map = { ok:'ok', dup:'warn', notfound:'bad', partial:'warn' };
+  const f = $('#flash'); f.className = 'flash ' + (map[kind] || ''); setTimeout(() => f.className = 'flash', 380);
+  beep(kind);
+  if(navigator.vibrate) navigator.vibrate(kind === 'ok' ? 80 : kind === 'dup' ? [60,60,60] : [200,80,200]);
+}
+let actx;
+function beep(kind){
+  if(!cfg.sound) return;
+  try{
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const tones = { ok:[[880,.09],[1320,.12]], dup:[[660,.1],[660,.1]], notfound:[[220,.35]], new:[[523,.1],[659,.1],[784,.15]] }[kind] || [[440,.08]];
+    let t = actx.currentTime;
+    for(const [fr, d] of tones){ const o = actx.createOscillator(), g = actx.createGain(); o.frequency.value = fr; o.type = 'square'; g.gain.setValueAtTime(.08, t); g.gain.exponentialRampToValueAtTime(.001, t + d); o.connect(g).connect(actx.destination); o.start(t); o.stop(t + d); t += d + .03; }
+  }catch{}
+}
+
+/* =====================================================================
+   INTERFAZ
+   ===================================================================== */
+function afterLoad(quiet){
+  show('work');
+  $('#fileChip').textContent = (S.file.history ? '🕘 ' : '📄 ') + S.file.name;
+  if(!quiet) $('#result').classList.add('hidden');
+  if(!S.entries.length) banner('No encontré ninguna columna de VIN/CHASIS en este archivo. Revisa que tenga un encabezado "VIN" o "CHASIS".');
+  renderAll();
+}
+function renderAll(){
+  const tot = S.entries.length, f = S.entries.filter(e => e.found).length;
+  $('#cFound').textContent = f; $('#cTotal').textContent = tot;
+  $('#barFill').style.width = tot ? (f / tot * 100).toFixed(1) + '%' : 0;
+  const pend = tot - f;
+  $('#cSub').textContent = tot ? `${pend} pendientes · ${(f / tot * 100).toFixed(0)}% · ${Object.keys(S.sheets).length} hoja(s)` + (S.queue.length ? ` · ${S.queue.length} por guardar` : '') : '';
+  $('#nPend').textContent = '(' + pend + ')'; $('#nFound').textContent = '(' + f + ')'; $('#nExtra').textContent = '(' + S.extras.length + ')';
+  renderList();
+}
+function renderList(){
+  const q = normVin($('#filter').value);
+  const ql = $('#filter').value.trim().toLowerCase();
+  let items, html = '';
+  const LIMIT = 250;
+  if(S.tab === 'extra'){
+    items = S.extras.filter(x => !q || x.vin.includes(q));
+    html = items.slice(0, LIMIT).map(x => `<li class="extra"><div class="grow"><div class="vin">${esc(x.vin)}</div><div class="meta">${esc(x.at)} · ${esc(x.src)}</div></div></li>`).join('');
+  } else {
+    const wantFound = S.tab === 'found';
+    items = S.entries.filter(e => e.found === wantFound && (!ql || e.vin.includes(q) || e.vals.some(v => v && v.toLowerCase().includes(ql))));
+    if(wantFound) items.sort((a, b) => (b.foundAt || '').localeCompare(a.foundAt || ''));
+    html = items.slice(0, LIMIT).map(e => `<li class="${e.found ? 'found' : ''}" data-id="${esc(e.id)}"><div class="grow"><div class="vin">${esc(e.vin)}</div><div class="meta">${esc(rowSummary(e)) || 'Fila ' + e.row}</div></div>${e.found ? `<span class="badge ok">${esc((e.foundAt || '✓').slice(0, 11))}</span>` : `<span class="badge">F${e.row}</span>`}</li>`).join('');
+  }
+  $('#list').innerHTML = html || `<li class="muted">${S.tab === 'pend' && S.entries.length ? '🎉 No quedan pendientes' : 'Nada por aquí'}</li>`;
+  $('#listMore').textContent = items.length > LIMIT ? `Mostrando ${LIMIT} de ${items.length}. Usa el filtro para encontrar más.` : '';
+}
+
+function vinDiffHtml(read, real){ return [...real].map((c, i) => read[i] === c ? esc(c) : `<b class="diff">${esc(c)}</b>`).join(''); }
+function renderResult(r){
+  const box = $('#result'); box.classList.remove('hidden', 'ok', 'warn', 'bad');
+  let h = '';
+  if(r.kind === 'ok' || r.kind === 'dup'){
+    const e = r.list[0];
+    box.classList.add(r.kind === 'ok' ? 'ok' : 'warn');
+    h = `<div class="st">${r.kind === 'ok' ? '✔ ENCONTRADO — fila sombreada' : '⚠ YA ESTABA REGISTRADO'}</div>
+      <div class="vin big">${esc(e.vin)}</div>
+      <div class="muted">Hoja <b>${esc(e.sheet)}</b> · Fila <b>${e.row}</b>${r.list.length > 1 ? ` · aparece ${r.list.length} veces` : ''}${e.foundAt ? ' · ' + esc(e.foundAt) : ''}</div>
+      <dl class="fields">${rowFields(e, 8).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+      <button class="btn sm danger" data-unmark="${esc(e.id)}">Deshacer</button>`;
+  } else if(r.kind === 'notfound'){
+    box.classList.add('bad');
+    h = `<div class="st">✖ NO ESTÁ EN EL MANIFIESTO</div><div class="vin big">${esc(r.vin)}</div>
+      <div class="muted">${VIN17.test(r.vin) ? (vinCheckOk(r.vin) ? 'Dígito verificador correcto.' : 'Revisa la lectura (el dígito verificador no coincide; puede ser normal en VIN no americanos).') : 'No tiene 17 caracteres.'} Quedó en la lista “No en manifiesto”.</div>`;
+    if(r.sugg && r.sugg.length){
+      h += `<div class="sec">¿Quisiste decir…?</div>` + r.sugg.map(s => `<div class="row" style="justify-content:space-between;margin-top:6px"><span class="vin">${vinDiffHtml(r.vin, s)}</span><button class="btn sm" data-pick="${esc(s)}">Es este</button></div>`).join('');
+    }
+  } else if(r.kind === 'partial'){
+    box.classList.add(r.list.length ? 'warn' : 'bad');
+    h = `<div class="st">${r.total ? r.total + ' coincidencia(s) con “' + esc(r.q) + '”' : 'Sin coincidencias para “' + esc(r.q) + '”'}</div>` +
+      r.list.map(e => `<div class="row" style="justify-content:space-between;margin-top:8px;gap:6px"><div style="min-width:0"><div class="vin">${esc(e.vin)}</div><div class="muted">${esc(rowSummary(e))}</div></div>${e.found ? '<span class="badge ok">✓</span>' : `<button class="btn sm" data-pick="${esc(e.vin)}">Marcar</button>`}</div>`).join('');
+  }
+  box.innerHTML = h;
+}
+
+function handleRead(raw, source){
+  const r = lookup(raw, source);
+  if(r.kind === 'none') return r;
+  if(r.kind === 'notvin') return r;
+  if(r.kind === 'notfound'){ addExtra(r.vin, source === 'ocr' ? 'OCR' : source === 'barcode' ? 'Código' : 'Manual'); }
+  feedback(r.kind); renderResult(r); renderAll();
+  return r;
+}
+function pick(vin){
+  const list = S.index.get(vin); if(!list) return;
+  // si venía de "no en manifiesto" por mala lectura, quitarlo de esa lista
+  const r = { kind: markEntries(list, 'manual'), vin, list };
+  S.extras = S.extras.filter(x => !(x.vin.length === 17 && vin.length === 17 && hamming(x.vin, vin, 4) <= 4));
+  store.set('vin_extra_' + S.file.id, S.extras);
+  feedback(r.kind); renderResult(r); renderAll();
+}
+
+/* ------------------------------ hojas (modales) ------------------------------ */
+function openSheet(html){ $('#sheetBody').innerHTML = html; $('#sheet').classList.remove('hidden'); }
+function closeSheet(){ $('#sheet').classList.add('hidden'); }
+function fmtDate(d){ return d ? new Date(d).toLocaleString('es-PE', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' }) : ''; }
+
+async function openFiles(){
+  const head = `<h3>Archivos <button data-act="close">✕</button></h3>`;
+  if(S.mode === 'local'){
+    openSheet(head + `<div class="card"><b>${esc(S.file?.name || '—')}</b><div class="muted">Modo teléfono · el progreso se guarda en este equipo</div>
+      <button class="btn primary" data-act="download">⬇ Descargar Excel sombreado</button>
+      <button class="btn" data-act="csv">⬇ Reporte CSV</button>
+      <button class="btn" data-act="local">Abrir otro Excel</button></div>
+      ${cfg.clientId ? '<button class="btn" data-act="login">Cambiar a OneDrive</button>' : ''}`);
+    return;
+  }
+  if(S.mode !== 'graph') return;
+  openSheet(head + `<div class="card"><div class="muted">Manifiesto actual</div><b>${esc(S.file?.name || '—')}</b>
+      <div class="muted">Subido ${fmtDate(S.file?.createdDateTime)} · carpeta “${esc(S.folder?.name)}”</div>
+      <button class="btn primary" data-act="upload">⬆ Subir manifiesto nuevo</button>
+      <p class="muted">Al subir uno nuevo (desde aquí o directo a la carpeta de OneDrive), el anterior se mueve solo a “${CONFIG.historyFolder}”.</p>
+      <button class="btn" data-act="refresh">↻ Revisar carpeta ahora</button>
+      ${S.file?.webUrl ? `<a class="btn" href="${esc(S.file.webUrl)}" target="_blank" rel="noopener">Abrir en Excel</a>` : ''}
+      <button class="btn" data-act="csv">⬇ Reporte CSV</button></div>
+      <div class="sec">${CONFIG.historyFolder}</div><div id="histList" class="muted"><span class="spinner"></span>Cargando…</div>`);
+  try{
+    const items = S.hist ? (await listChildren(S.folder.driveId, S.hist.id)).filter(isXlsx).sort(byNewest) : [];
+    $('#histList').innerHTML = items.length ? `<ul class="list">` + items.map(i => `<li><div class="grow"><div style="font-weight:600;word-break:break-word">${esc(i.name)}</div><div class="meta">${fmtDate(i.createdDateTime)}</div></div><button class="btn sm" data-hist="${esc(i.id)}">Abrir</button></li>`).join('') + `</ul>` : 'Todavía no hay archivos anteriores.';
+  } catch(e){ $('#histList').textContent = 'No se pudo leer el historial: ' + e.message; }
+}
+
+function openSettings(){
+  openSheet(`<h3>Ajustes <button data-act="close">✕</button></h3>
+    <label class="f">Carpeta de OneDrive (ruta o enlace compartido de la carpeta)</label>
+    <input class="t" id="sFolder" value="${esc(cfg.folder)}">
+    <p class="muted">Ej.: <code>Escaneo VIN</code> o pega el enlace “Compartir” de una carpeta de OneDrive/SharePoint para que todo el equipo use la misma.</p>
+    <label class="f">Color de sombreado</label>
+    <div class="row"><input type="color" id="sColor" value="${esc(cfg.color)}" style="width:60px;height:40px;border:0;background:none"><span class="muted">Verde Excel por defecto (#92D050)</span></div>
+    <label class="f"><input type="checkbox" id="sMarker" ${cfg.marker ? 'checked' : ''}> Escribir también columna “${MARK_HEADER}” con fecha, hora y usuario</label>
+    <label class="f"><input type="checkbox" id="sSound" ${cfg.sound ? 'checked' : ''}> Sonido y vibración</label>
+    <label class="f">Nombre del operador (modo teléfono)</label>
+    <input class="t" id="sOp" value="${esc(cfg.operator)}">
+    <div class="sec">Conexión Microsoft 365</div>
+    <label class="f">Client ID (Azure / Entra ID)</label>
+    <input class="t" id="sClient" value="${esc(cfg.clientId)}" placeholder="00000000-0000-0000-0000-000000000000">
+    <label class="f">Tenant</label>
+    <input class="t" id="sTenant" value="${esc(cfg.tenant)}">
+    <p class="muted">URL de redirección a registrar: <code>${esc(location.origin + location.pathname)}</code></p>
+    <button class="btn primary" data-act="saveCfg">Guardar</button>
+    ${S.account ? `<button class="btn danger" data-act="logout">Cerrar sesión (${esc(S.account.username)})</button>` : ''}`);
+}
+function saveSettings(){
+  const old = JSON.stringify([cfg.folder, cfg.clientId, cfg.tenant, cfg.color]);
+  cfg.folder = $('#sFolder').value.trim() || CONFIG.folder;
+  cfg.color = $('#sColor').value.toUpperCase();
+  cfg.marker = $('#sMarker').checked; cfg.sound = $('#sSound').checked;
+  cfg.operator = $('#sOp').value.trim();
+  cfg.clientId = $('#sClient').value.trim(); cfg.tenant = $('#sTenant').value.trim() || 'organizations';
+  store.set('vin_cfg', cfg); closeSheet();
+  if(old !== JSON.stringify([cfg.folder, cfg.clientId, cfg.tenant, cfg.color])) location.reload();
+  else toast('Ajustes guardados');
+}
+
+function openDetail(e){
+  openSheet(`<h3>Detalle <button data-act="close">✕</button></h3>
+    <div class="card"><div class="vin big">${esc(e.vin)}</div><div class="muted">Hoja ${esc(e.sheet)} · Fila ${e.row} · ${e.found ? '✔ Encontrado ' + esc(e.foundAt || '') : 'Pendiente'}</div>
+    <dl class="fields">${rowFields(e).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl></div>
+    ${e.found ? `<button class="btn danger" data-unmark="${esc(e.id)}">Quitar marca</button>` : `<button class="btn primary" data-pick="${esc(e.vin)}">Marcar como encontrado</button>`}`);
+}
+
+function errorScreen(e){
+  console.error(e);
+  setSync('err', e.message);
+  if(S.entries.length){ show('work'); toast('⚠ ' + e.message, 5000); return; }
+  show('welcome');
+  banner('⚠ ' + esc(e.message) + (/AADSTS|401|403/.test(e.message) ? ' — revisa permisos/Client ID en Ajustes.' : ''));
+}
+
+/* =====================================================================
+   CÁMARA: código de barras (continuo) + OCR del VIN impreso
+   ===================================================================== */
+const Scan = {
+  stream: null, track: null, running: false, detector: null, zx: null, timer: 0, frame: 0, busy: false,
+  canvas: document.createElement('canvas'),
+  async open(){
+    if(!S.entries.length) return toast('Primero abre un manifiesto');
+    $('#scanner').classList.remove('hidden'); this.msg('Iniciando cámara…');
+    try{
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio:false, video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1920 }, height:{ ideal:1080 } } });
+    } catch(e){ this.close(); return toast('No se pudo abrir la cámara: ' + (e.name === 'NotAllowedError' ? 'permiso denegado' : e.message), 5000); }
+    const v = $('#video'); v.srcObject = this.stream; await v.play().catch(() => {});
+    this.track = this.stream.getVideoTracks()[0];
+    try{ const cap = this.track.getCapabilities ? this.track.getCapabilities() : {};
+      $('#scTorch').classList.toggle('hidden', !cap.torch);
+      if(cap.focusMode && cap.focusMode.includes('continuous')) this.track.applyConstraints({ advanced:[{ focusMode:'continuous' }] }).catch(() => {});
+    } catch{}
+    await this.setupDecoder();
+    this.running = true; this.msg(''); this.loop();
+  },
+  async setupDecoder(){
+    if('BarcodeDetector' in window){
+      try{
+        const sup = await BarcodeDetector.getSupportedFormats();
+        const want = ['code_39','code_128','data_matrix','qr_code','pdf417','code_93','aztec'].filter(f => sup.includes(f));
+        if(want.includes('code_39') || want.includes('code_128')){ this.detector = new BarcodeDetector({ formats: want }); return; }
+      } catch{}
+    }
+    if(!this.zx){
+      this.msg('Cargando lector…');
+      await loadScript(LIB.zxing);
+      const Z = ZXing, hints = new Map();
+      hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.CODE_39, Z.BarcodeFormat.CODE_128, Z.BarcodeFormat.DATA_MATRIX, Z.BarcodeFormat.QR_CODE, Z.BarcodeFormat.PDF_417]);
+      hints.set(Z.DecodeHintType.TRY_HARDER, true);
+      this.zx = new Z.MultiFormatReader(); this.zx.setHints(hints);
+    }
+  },
+  /* recorta la zona del recuadro guía (o toda la imagen) */
+  grab(full, rotate){
+    const v = $('#video'), vw = v.videoWidth, vh = v.videoHeight;
+    if(!vw) return null;
+    const el = v.getBoundingClientRect(), g = $('#guide').getBoundingClientRect();
+    const scale = Math.max(el.width / vw, el.height / vh);              // object-fit: cover
+    const ox = (vw * scale - el.width) / 2, oy = (vh * scale - el.height) / 2;
+    let sx = (g.left - el.left + ox) / scale, sy = (g.top - el.top + oy) / scale, sw = g.width / scale, sh = g.height / scale;
+    if(full){ sx = 0; sy = 0; sw = vw; sh = vh; }
+    else { const padY = sh * .6; sy = Math.max(0, sy - padY); sh = Math.min(vh - sy, sh + padY * 2); }
+    const c = this.canvas, ctx = c.getContext('2d', { willReadFrequently: true });
+    const maxW = full ? 1280 : 1600, k = Math.min(1, maxW / sw);
+    if(rotate){ c.width = sh * k; c.height = sw * k; ctx.save(); ctx.translate(c.width / 2, c.height / 2); ctx.rotate(Math.PI / 2); ctx.drawImage(v, sx, sy, sw, sh, -c.height / 2, -c.width / 2, c.height, c.width); ctx.restore(); }
+    else { c.width = sw * k; c.height = sh * k; ctx.drawImage(v, sx, sy, sw, sh, 0, 0, c.width, c.height); }
+    return c;
+  },
+  async decode(){
+    if(this.detector){
+      const res = await this.detector.detect($('#video'));
+      return res.map(r => r.rawValue).filter(Boolean);
+    }
+    const f = this.frame++ % 3;   // alterna: recuadro, recuadro rotado (etiquetas verticales), imagen completa
+    const c = this.grab(f === 2, f === 1); if(!c) return [];
+    try{
+      const src = new ZXing.HTMLCanvasElementLuminanceSource(c);
+      const r = this.zx.decodeWithState(new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(src)));
+      return [r.getText()];
+    } catch{ return []; } finally { this.zx.reset && this.zx.reset(); }
+  },
+  async loop(){
+    if(!this.running) return;
+    if(!this.busy){
+      try{
+        const codes = await this.decode();
+        for(const code of codes){ if(this.onCode(code)) break; }
+      } catch{}
+    }
+    this.timer = setTimeout(() => this.loop(), this.detector ? 150 : 60);
+  },
+  onCode(code){
+    const key = normVin(code), t = Date.now();
+    if(key === lastHit.v && t - lastHit.t < 3500) return true;
+    const r = handleRead(code, 'barcode');
+    if(r.kind === 'notvin'){ this.msg(`Código leído (no es VIN): ${esc(code).slice(0, 40)}`, ''); return false; }
+    lastHit = { v: key, t };
+    this.showResult(r);
+    return true;
+  },
+  showResult(r){
+    const g = $('#guide'), cls = { ok:'ok', dup:'warn', notfound:'bad', partial:'warn' }[r.kind] || '';
+    g.className = 'guide ' + cls; setTimeout(() => g.className = 'guide', 1200);
+    if(r.kind === 'ok') this.msg(`✔ ENCONTRADO<br><span class="vin">${esc(r.vin)}</span><br><small>Fila ${r.list[0].row} · ${esc(rowSummary(r.list[0]))}</small>`, 'ok');
+    else if(r.kind === 'dup') this.msg(`⚠ YA REGISTRADO<br><span class="vin">${esc(r.vin)}</span>`, 'warn');
+    else if(r.kind === 'notfound') this.msg(`✖ NO ESTÁ EN EL MANIFIESTO<br><span class="vin">${esc(r.vin)}</span>${r.sugg?.length ? '<br><small>Hay VIN parecidos: toca Listo para revisar</small>' : ''}`, 'bad');
+  },
+  async ocr(){
+    if(this.busy) return;
+    this.busy = true; const btn = $('#scOcr'); btn.disabled = true; btn.textContent = '⏳ Leyendo…';
+    try{
+      if(!this.tess){
+        this.msg('Descargando lector de texto (solo la primera vez)…');
+        await loadScript(LIB.tesseract);
+        this.tess = await Tesseract.createWorker('eng');
+        await this.tess.setParameters({ tessedit_char_whitelist: 'ABCDEFGHJKLMNPRSTUVWXYZ0123456789', tessedit_pageseg_mode: '7' });
+      }
+      const c = this.grab(false, false);
+      if(!c) throw new Error('Cámara no lista');
+      // escala de grises + contraste
+      const ctx = c.getContext('2d'), img = ctx.getImageData(0, 0, c.width, c.height), d = img.data;
+      for(let i = 0; i < d.length; i += 4){ let y = .299 * d[i] + .587 * d[i+1] + .114 * d[i+2]; y = Math.max(0, Math.min(255, (y - 128) * 1.6 + 128)); d[i] = d[i+1] = d[i+2] = y; }
+      ctx.putImageData(img, 0, 0);
+      let { data } = await this.tess.recognize(c);
+      let text = data.text || '';
+      let r = this.ocrPick(text);
+      if(!r){ await this.tess.setParameters({ tessedit_pageseg_mode: '6' }); ({ data } = await this.tess.recognize(c)); text = data.text || ''; await this.tess.setParameters({ tessedit_pageseg_mode: '7' }); r = this.ocrPick(text); }
+      if(!r){ this.msg(`No pude leer un VIN completo${normVin(text) ? ': ' + esc(normVin(text).slice(0, 24)) : ''}.<br><small>Acerca más, que el VIN llene el recuadro y evita reflejos.</small>`, 'warn'); return; }
+      const res = handleRead(r, 'ocr');
+      lastHit = { v: normVin(r), t: Date.now() };
+      this.showResult(res);
+      if(res.kind === 'notfound' && res.sugg?.length) this.close();
+    } catch(e){ this.msg('Error OCR: ' + esc(e.message), 'bad'); }
+    finally { this.busy = false; btn.disabled = false; btn.textContent = '🔤 Leer VIN impreso'; }
+  },
+  /* elige el mejor VIN dentro del texto reconocido */
+  ocrPick(text){
+    const lines = text.split(/\n/).map(l => l).concat([text.replace(/\n/g, '')]);
+    let fallback = null;
+    for(const l of lines){
+      for(const c of candidates(l, true)){
+        if(S.index.has(c)) return c;
+        if(c.length === 17){ if(fuzzy(c, 3).length) return c; if(!fallback && VIN17.test(c)) fallback = c; }
+      }
+    }
+    return fallback;
+  },
+  async torch(){
+    try{ this.torchOn = !this.torchOn; await this.track.applyConstraints({ advanced:[{ torch: this.torchOn }] }); $('#scTorch').classList.toggle('on', this.torchOn); } catch{ toast('Linterna no disponible'); }
+  },
+  msg(html, cls = ''){ $('#scMsg').innerHTML = html ? `<span class="pill ${cls}">${html}</span>` : ''; },
+  close(){
+    this.running = false; clearTimeout(this.timer);
+    if(this.stream) this.stream.getTracks().forEach(t => t.stop());
+    this.stream = null; this.torchOn = false; $('#scTorch').classList.remove('on');
+    $('#scanner').classList.add('hidden');
+  }
+};
+
+/* ------------------------------ eventos ------------------------------ */
+$('#btnScan').onclick = () => { beep('none'); Scan.open(); };
+$('#scClose').onclick = $('#scDone').onclick = () => Scan.close();
+$('#scOcr').onclick = () => Scan.ocr();
+$('#scTorch').onclick = () => Scan.torch();
+$('#manual').onsubmit = ev => { ev.preventDefault(); const v = $('#q').value; if(normVin(v).length < 4) return toast('Escribe al menos 4 caracteres'); handleRead(v, 'manual'); $('#q').select(); };
+$('#filter').oninput = () => renderList();
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b)); renderList(); });
+$('#list').onclick = ev => { const li = ev.target.closest('li[data-id]'); if(li){ const e = S.entries.find(x => x.id === li.dataset.id); if(e) openDetail(e); } };
+$('#fileChip').onclick = () => openFiles();
+$('#btnSettings').onclick = () => openSettings();
+$('#btnLocal').onclick = () => $('#fileLocal').click();
+$('#btnLogin').onclick = () => login();
+$('#fileLocal').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; if(f){ closeSheet(); openLocal(f); } };
+$('#fileUpload').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; if(f){ closeSheet(); uploadManifest(f); } };
+$('#sheet').onclick = ev => { if(ev.target.id === 'sheet') closeSheet(); };
+document.addEventListener('click', async ev => {
+  const t = ev.target.closest('[data-act],[data-pick],[data-unmark],[data-hist]'); if(!t) return;
+  if(t.dataset.pick){ closeSheet(); pick(t.dataset.pick); return; }
+  if(t.dataset.unmark){ const e = S.entries.find(x => x.id === t.dataset.unmark); closeSheet(); if(e){ unmark(e); $('#result').classList.add('hidden'); } return; }
+  if(t.dataset.hist){ closeSheet(); try{ await loadGraphFile({ id: t.dataset.hist }, { driveId: S.folder.driveId, history: true }); } catch(e){ errorScreen(e); } return; }
+  const a = t.dataset.act;
+  if(a === 'close') closeSheet();
+  else if(a === 'upload') $('#fileUpload').click();
+  else if(a === 'refresh'){ closeSheet(); try{ await refreshFolder(); } catch(e){ errorScreen(e); } }
+  else if(a === 'current'){ banner(''); S.file && (S.file.history = false); S.file = null; try{ await refreshFolder({ initial: true }); } catch(e){ errorScreen(e); } }
+  else if(a === 'download'){ closeSheet(); downloadMarked(); }
+  else if(a === 'csv'){ closeSheet(); exportCsv(); }
+  else if(a === 'local'){ $('#fileLocal').click(); }
+  else if(a === 'login'){ closeSheet(); login(); }
+  else if(a === 'saveCfg') saveSettings();
+  else if(a === 'logout'){ store.set('vin_mode', ''); await msalApp.logoutRedirect({ account: S.account }); }
+});
+window.addEventListener('online', () => flushQueue());
+document.addEventListener('visibilitychange', () => { if(!document.hidden && S.mode === 'graph') refreshFolder().catch(() => {}); });
+
+async function login(){
+  if(!cfg.clientId){ $('#loginHint').classList.remove('hidden'); openSettings(); return; }
+  store.set('vin_mode', 'graph');
+  try{ if(!msalApp) await initMsal(); await msalApp.loginRedirect({ scopes: SCOPES }); }
+  catch(e){ errorScreen(e); }
+}
+
+async function startGraph(){
+  S.mode = 'graph';
+  loading('Conectando con OneDrive…');
+  S.folder = await resolveFolder();
+  await refreshFolder({ initial: true });
+  flushQueue();
+  setInterval(() => { if(!document.hidden && !Scan.running) refreshFolder().catch(e => setSync('err', e.message)); }, CONFIG.pollSeconds * 1000);
+}
+
+(async function init(){
+  if('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  const mode = store.get('vin_mode', '');
+  try{
+    if(cfg.clientId){
+      await initMsal();
+      if(S.account && mode !== 'local') return await startGraph();
+    }
+    if(mode === 'local'){
+      const last = await idb.get('lastLocal');
+      if(last) return await openLocal({ name: last.name, size: last.buf.byteLength }, last.buf);
+    }
+    show('welcome');
+    if(!cfg.clientId) $('#loginHint').classList.remove('hidden');
+  } catch(e){ errorScreen(e); }
+})();
+</script>
+</body>
+</html>
