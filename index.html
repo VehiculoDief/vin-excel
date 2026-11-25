@@ -184,8 +184,8 @@ input.t{width:100%;border:1px solid var(--line);background:var(--card);border-ra
    CONFIGURACIÓN — se puede dejar vacío y llenar desde ⚙ Ajustes
    ===================================================================== */
 const CONFIG = {
-  clientId: '',                 // Id. de aplicación (cliente) de Azure / Entra ID
-  tenant: 'organizations',      // o el Id. de inquilino de Supervan
+  clientId: '47127ae7-3530-4f18-a321-1dee20c993ab',   // Registro "Escáner VIN" en Entra ID
+  tenant: '8cc2cda1-ed74-477a-8ae9-425cfb85f181',   // SUPERVAN S.A.C.
   // carpeta donde se suben los manifiestos (OneDrive de supervisor@dief.pe, compartida con el equipo)
   folder: 'https://supervanperu-my.sharepoint.com/personal/supervisor_dief_pe/Documents/Respaldo de Balanza 2025/Vehiculos',
   historyFolder: 'Historial',
@@ -248,7 +248,9 @@ const idb = {
 
 /* ------------------------------ estado ------------------------------ */
 const cfg = Object.assign({ clientId: CONFIG.clientId, tenant: CONFIG.tenant, folder: CONFIG.folder,
-  color: '#92D050', marker: false, sound: true, operator: '' }, store.get('vin_cfg', {}));
+  color: '#92D050', marker: false, sound: true, operator: '' },
+  Object.fromEntries(Object.entries(store.get('vin_cfg', {})).filter(([, v]) => v !== '' && v != null)));
+if(cfg.tenant === 'organizations' && CONFIG.tenant !== 'organizations') cfg.tenant = CONFIG.tenant;
 const S = {
   mode: null,          // 'graph' | 'local'
   account: null,
