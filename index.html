@@ -94,6 +94,14 @@ ul.list li.late{border-left:6px solid var(--bad)}
 .result.out .st{color:var(--blue)}
 .times{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin-top:8px;font-size:15px}
 .times dt{color:var(--muted)} .times dd{margin:0;font-weight:700}
+/* Usuarios */
+body:not(.admin) .adm{display:none!important}
+body.admin .only-user{display:none!important}
+ul.users li{flex-wrap:wrap}
+ul.users li .acts{display:flex;flex-wrap:wrap;gap:6px;width:100%}
+ul.users li .acts .btn.sm{margin:0}
+.badge.adm-b{background:#e8defc;color:#5b2fb3}
+.badge.off{background:var(--bad-bg);color:var(--bad)}
 /* Resumen por marca y modelo */
 select.filter{font-weight:700}
 .seg{display:flex;gap:6px;margin-bottom:10px}
@@ -154,6 +162,7 @@ input.t{width:100%;border:1px solid var(--line);background:var(--card);border-ra
   <div class="brand">VIN✓</div>
   <button id="fileChip" class="chip">Sin archivo</button>
   <span id="sync" class="dot" title="Sincronización"></span>
+  <button id="btnUser" class="icon hidden" aria-label="Usuario">👤</button>
   <button id="btnSettings" class="icon" aria-label="Ajustes">⚙</button>
 </header>
 
@@ -167,14 +176,45 @@ input.t{width:100%;border:1px solid var(--line);background:var(--card);border-ra
     <p class="muted">Escanea el VIN con la cámara y la app sombrea la fila del manifiesto donde aparece.</p>
     <button id="btnLogin" class="btn primary">Entrar con Microsoft 365 (OneDrive)</button>
     <p id="loginHint" class="muted hidden">Para usar OneDrive primero configura el <b>Client ID</b> en ⚙ Ajustes (ver LEEME).</p>
-    <button id="btnLocal" class="btn">Abrir Excel desde este teléfono</button>
-    <p class="muted">Modo teléfono: trabaja sin internet y al final descargas el Excel con las filas sombreadas.</p>
+    <div id="localBox" class="hidden">
+      <button id="btnLocal" class="btn">Abrir Excel desde este teléfono</button>
+      <p class="muted">Modo teléfono: trabaja sin internet y al final descargas el Excel con las filas sombreadas.</p>
+    </div>
+  </section>
+
+  <!-- inicio de sesión de usuarios de la app -->
+  <section id="appLogin" class="card hidden">
+    <h2>Iniciar sesión</h2>
+    <p class="muted">Entra con el usuario y la clave que te dio el administrador.</p>
+    <form id="loginForm" autocomplete="on">
+      <label class="f">Usuario</label>
+      <input class="t" id="lgUser" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+      <label class="f">Clave</label>
+      <input class="t" id="lgPass" type="password" autocomplete="current-password" required>
+      <button class="btn primary" type="submit" id="lgBtn">Entrar</button>
+    </form>
+    <p id="lgMsg" class="muted" style="color:var(--bad)"></p>
+  </section>
+
+  <!-- primera vez: crear el administrador -->
+  <section id="setup" class="card hidden">
+    <h2>Configuración inicial</h2>
+    <p class="muted">Todavía no hay usuarios. Crea la cuenta del <b>administrador</b>: podrá crear usuarios, activarlos o desactivarlos, subir y archivar manifiestos.</p>
+    <form id="setupForm" autocomplete="off">
+      <label class="f">Nombre y apellido</label><input class="t" id="suName" required>
+      <label class="f">Usuario</label><input class="t" id="suUser" autocapitalize="none" spellcheck="false" required>
+      <label class="f">Clave (mínimo 6 caracteres)</label><input class="t" id="suPass" type="password" autocomplete="new-password" required>
+      <label class="f">Repetir clave</label><input class="t" id="suPass2" type="password" autocomplete="new-password" required>
+      <button class="btn primary" type="submit">Crear administrador</button>
+    </form>
+    <p id="suMsg" class="muted" style="color:var(--bad)"></p>
   </section>
 
   <section id="empty" class="card hidden">
     <h2>Carpeta sin manifiesto</h2>
     <p class="muted">No hay ningún .xlsx en la carpeta <b id="emptyFolder"></b>. Súbelo desde aquí o desde OneDrive.</p>
-    <button class="btn primary" data-act="upload">Subir manifiesto</button>
+    <button class="btn primary adm" data-act="upload">Subir manifiesto</button>
+    <p class="muted only-user">Pide al administrador que suba el manifiesto.</p>
     <button class="btn" data-act="refresh">Volver a revisar</button>
   </section>
 
@@ -245,7 +285,8 @@ const CONFIG = {
   folder: 'https://supervanperu-my.sharepoint.com/personal/supervisor_dief_pe/Documents/Respaldo de Balanza 2025/Vehiculos',
   historyFolder: 'Historial',
   loginHint: 'escaner.vin@dief.pe',   // cuenta que se propone al iniciar sesión
-  custodyDays: 0,                     // días de custodia contratados (0 = sin alerta); se puede cambiar en Ajustes
+  custodyDays: 0,                     // días de custodia contratados (0 = sin alerta); el administrador lo cambia en Ajustes
+  allowLocalMode: false,              // "Abrir Excel desde este teléfono" (sin usuarios): desactivado para que todos pasen por el login
   pollSeconds: 45
 };
 
@@ -339,7 +380,7 @@ const normH = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUp
 let toastT;
 function toast(msg, ms = 2600){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'), ms); }
 function setSync(s, title=''){ const d=$('#sync'); d.className='dot '+s; d.title=title; }
-function show(id){ ['loading','welcome','empty','work'].forEach(x => $('#'+x).classList.toggle('hidden', x!==id)); }
+function show(id){ ['loading','welcome','empty','work','appLogin','setup'].forEach(x => $('#'+x).classList.toggle('hidden', x!==id)); }
 function loading(txt){ $('#loadingTxt').textContent = txt; show('loading'); }
 function banner(html){ const b=$('#banner'); b.innerHTML=html||''; b.classList.toggle('hidden', !html); }
 
@@ -628,9 +669,14 @@ const byNewest = (a, b) => new Date(b.createdDateTime) - new Date(a.createdDateT
 /* Revisa la carpeta: TODOS los .xlsx de la carpeta son manifiestos activos (pueden ser de formatos distintos).
    Un manifiesto pasa a Historial cuando salieron todos sus vehículos, o a mano con el botón "Archivar". */
 async function refreshFolder({ initial = false } = {}){
+  if(S.mode === 'graph' && !Auth.session) return;   // nadie ha iniciado sesión en la app
   setSync('busy', 'Revisando carpeta…');
   const F = S.folder;
   const kids = await listChildren(F.driveId, F.id);
+  // ¿cambió la lista de usuarios? (desactivaciones, cierres de sesión, ajustes generales)
+  const cf = kids.find(k => k.file && k.name === CFG_FILE);
+  if(cf && cf.cTag !== Auth.cTag){ await loadAppConfig(); if(S.files.length) renderAll(); }
+  if(!checkSession()) return;
   S.hist = kids.find(k => k.folder && k.name.toLowerCase() === CONFIG.historyFolder.toLowerCase()) || null;
   const items = kids.filter(isXlsx).sort(byNewest);
   if(S.history){ setSync('ok'); return; }          // consultando el Historial: no se recargan los activos
@@ -742,6 +788,7 @@ async function applyOp(op){
 }
 
 async function uploadManifest(file){
+  if(!isAdmin()) return toast('Solo el administrador puede subir manifiestos');
   if(!/\.xlsx$/i.test(file.name)) return toast('Debe ser un archivo .xlsx');
   const F = S.folder; loading('Subiendo ' + file.name + '…');
   try{
@@ -762,6 +809,194 @@ async function uploadManifest(file){
     if(!S.files.length) loading('Abriendo…');
     await refreshFolder();
   } catch(e){ errorScreen(e); }
+}
+
+/* =====================================================================
+   USUARIOS DE LA APP
+   - Lista en "vin-config.json" dentro de la carpeta de manifiestos (la ven todos los celulares).
+   - Claves guardadas con PBKDF2-SHA256 + sal: nunca en texto legible.
+   - Desactivar o "cerrar sesión" a un usuario lo saca de la app en el siguiente chequeo (≤ 45 s).
+   ===================================================================== */
+const CFG_FILE = 'vin-config.json';
+const Auth = { conf: null, eTag: null, cTag: null, session: store.get('vin_session', null), polling: false };
+const isAdmin = () => S.mode !== 'graph' || Auth.session?.role === 'admin';
+const rndHex = n => [...crypto.getRandomValues(new Uint8Array(n))].map(b => b.toString(16).padStart(2, '0')).join('');
+async function hashPass(pass, salt){
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: enc.encode(salt), iterations: 150000, hash: 'SHA-256' }, key, 256);
+  return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+const normUser = u => String(u || '').trim().toLowerCase().replace(/\s+/g, '.');
+async function makeUser(name, user, pass, role){
+  const salt = rndHex(16);
+  return { id: rndHex(8), user: normUser(user), name: name.trim(), role, active: true, rev: 0, salt, hash: await hashPass(pass, salt),
+    created: new Date().toISOString(), createdBy: Auth.session?.name || '' };
+}
+/* ajustes generales que define el administrador y valen para todos los celulares */
+function applyGlobalSettings(){
+  const s = Auth.conf?.settings || {};
+  if(s.custodyDays != null) cfg.custodyDays = s.custodyDays;
+  if(s.color) cfg.color = s.color;
+  if(s.colorOut) cfg.colorOut = s.colorOut;
+}
+async function loadAppConfig(){
+  const F = S.folder;
+  try{
+    const meta = await gfetch(`/drives/${F.driveId}/items/${F.id}:/${CFG_FILE}`);
+    const txt = await (await fetch(meta['@microsoft.graph.downloadUrl'], { cache: 'no-store' })).text();
+    Auth.conf = JSON.parse(txt); Auth.eTag = meta.eTag; Auth.cTag = meta.cTag;
+  } catch(e){
+    if(e.status === 404){ Auth.conf = null; Auth.eTag = null; Auth.cTag = null; return null; }
+    throw e;
+  }
+  if(!Array.isArray(Auth.conf.users)) Auth.conf.users = [];
+  store.set('vin_conf_cache', Auth.conf);
+  applyGlobalSettings();
+  return Auth.conf;
+}
+/* guarda cambios en la lista de usuarios; si otro administrador guardó antes, se reintenta sobre su versión */
+async function saveAppConfig(mutate){
+  const F = S.folder;
+  for(let i = 0; i < 4; i++){
+    const next = Auth.conf ? JSON.parse(JSON.stringify(Auth.conf)) : { app: 'VIN-EXCEL', version: 1, users: [], settings: {} };
+    const err = mutate(next); if(err) throw new Error(err);
+    next.updated = new Date().toISOString(); next.updatedBy = Auth.session?.name || '';
+    try{
+      const res = await gfetch(`/drives/${F.driveId}/items/${F.id}:/${CFG_FILE}:/content`, { method: 'PUT', body: JSON.stringify(next, null, 2),
+        headers: Object.assign({ 'Content-Type': 'application/json' }, Auth.eTag ? { 'If-Match': Auth.eTag } : {}) });
+      Auth.conf = next; Auth.eTag = res.eTag; Auth.cTag = res.cTag;
+      store.set('vin_conf_cache', next); applyGlobalSettings();
+      return next;
+    } catch(e){
+      if(e.status === 412 || e.status === 409){ await loadAppConfig(); continue; }
+      throw e;
+    }
+  }
+  throw new Error('Otro administrador está guardando cambios. Intenta de nuevo.');
+}
+function sessionUser(){ const s = Auth.session; return s && Auth.conf ? Auth.conf.users.find(u => u.id === s.id) : null; }
+function sessionValid(){
+  if(S.mode !== 'graph') return true;
+  const u = sessionUser();
+  return !!(u && u.active && (u.rev || 0) === Auth.session.rev);
+}
+/* revisa la sesión con la última lista de usuarios; si ya no es válida, saca al usuario */
+function checkSession(){
+  if(S.mode !== 'graph' || !Auth.session) return true;
+  if(!sessionValid()){
+    const u = sessionUser();
+    kick(!u ? 'Tu usuario fue eliminado.' : !u.active ? 'Tu acceso fue desactivado por el administrador.' : 'El administrador cerró tu sesión.');
+    return false;
+  }
+  const u = sessionUser();   // el administrador pudo cambiarle el nombre o el rol
+  if(u.name !== Auth.session.name || u.role !== Auth.session.role){ Auth.session.name = u.name; Auth.session.role = u.role; store.set('vin_session', Auth.session); renderUser(); }
+  return true;
+}
+function renderUser(){
+  const on = S.mode === 'graph' && !!Auth.session;
+  $('#btnUser').classList.toggle('hidden', !on);
+  $('#btnUser').title = on ? Auth.session.name : '';
+  document.body.classList.toggle('admin', isAdmin());
+}
+function kick(msg){
+  Auth.session = null; store.set('vin_session', null);
+  try{ Scan.close(); }catch{}
+  closeSheet(); S.files = []; S.history = null; rebuild(); banner('');
+  renderUser(); showLogin(msg);
+}
+function showLogin(msg){
+  show('appLogin'); $('#fileChip').textContent = 'Iniciar sesión';
+  $('#lgMsg').textContent = msg || ''; $('#lgPass').value = '';
+  setTimeout(() => $('#lgUser').focus(), 100);
+}
+async function doLogin(user, pass){
+  const lock = store.get('vin_lock', { n: 0, until: 0 });
+  if(lock.until > Date.now()) throw new Error(`Demasiados intentos. Espera ${Math.ceil((lock.until - Date.now()) / 1000)} s.`);
+  try{ await loadAppConfig(); } catch{ Auth.conf = Auth.conf || store.get('vin_conf_cache', null); }   // sin señal: última lista conocida
+  if(!Auth.conf) throw new Error('No se pudo leer la lista de usuarios. Revisa la conexión.');
+  const u = Auth.conf.users.find(x => x.user === normUser(user));
+  const ok = u && (await hashPass(pass, u.salt)) === u.hash;
+  if(!ok){
+    const n = lock.n + 1; store.set('vin_lock', { n: n >= 5 ? 0 : n, until: n >= 5 ? Date.now() + 60000 : 0 });
+    throw new Error(n >= 5 ? 'Demasiados intentos. Espera 1 minuto.' : 'Usuario o clave incorrectos.');
+  }
+  if(!u.active) throw new Error('Tu usuario está desactivado. Consulta al administrador.');
+  store.set('vin_lock', { n: 0, until: 0 });
+  Auth.session = { id: u.id, user: u.user, name: u.name, role: u.role, rev: u.rev || 0, at: Date.now() };
+  store.set('vin_session', Auth.session);
+  renderUser();
+  await enterApp();
+}
+async function enterApp(){
+  renderUser();
+  loading('Abriendo manifiestos…');
+  await refreshFolder({ initial: true });
+  flushQueue();
+  if(!Auth.polling){
+    Auth.polling = true;
+    setInterval(() => { if(!document.hidden && !Scan.running && Auth.session) refreshFolder().catch(e => setSync('err', e.message)); }, CONFIG.pollSeconds * 1000);
+  }
+}
+function logoutApp(){ if(confirm('¿Cerrar tu sesión en este celular?')) kick('Sesión cerrada.'); }
+
+/* ---- panel del usuario y administración de usuarios ---- */
+function openUserMenu(){
+  const s = Auth.session; if(!s) return;
+  openSheet(`<h3>${esc(s.name)} <button data-act="close">✕</button></h3>
+    <p class="muted">Usuario <b>${esc(s.user)}</b> · ${s.role === 'admin' ? '<span class="badge adm-b">Administrador</span>' : '<span class="badge">Operario</span>'}</p>
+    ${s.role === 'admin' ? '<button class="btn primary" data-act="users">👥 Administrar usuarios</button>' : ''}
+    <button class="btn" data-act="mypass">🔑 Cambiar mi clave</button>
+    <button class="btn danger" data-act="applogout">Cerrar sesión</button>`);
+}
+function openUsers(){
+  if(!isAdmin()) return;
+  const us = (Auth.conf?.users || []).slice().sort((a, b) => (b.active - a.active) || a.name.localeCompare(b.name));
+  const me = Auth.session.id;
+  openSheet(`<h3>Usuarios <button data-act="close">✕</button></h3>
+    <p class="muted">Los cambios llegan a los celulares en menos de 1 minuto. Desactivar o cerrar la sesión saca al usuario de la app.</p>
+    <ul class="list users">${us.map(u => `<li>
+      <div class="grow"><div style="font-weight:700">${esc(u.name)} ${u.id === me ? '<span class="muted">(tú)</span>' : ''}</div>
+        <div class="meta">${esc(u.user)}</div></div>
+      ${u.role === 'admin' ? '<span class="badge adm-b">Admin</span>' : '<span class="badge">Operario</span>'}
+      ${u.active ? '<span class="badge ok">Activo</span>' : '<span class="badge off">Desactivado</span>'}
+      <div class="acts">${u.id === me ? '' : `
+        <button class="btn sm" data-ua="toggle" data-uid="${u.id}">${u.active ? '⛔ Desactivar' : '✅ Activar'}</button>
+        ${u.active ? `<button class="btn sm" data-ua="kick" data-uid="${u.id}">🚪 Cerrar sesión</button>` : ''}
+        <button class="btn sm" data-ua="role" data-uid="${u.id}">${u.role === 'admin' ? 'Hacer operario' : 'Hacer admin'}</button>`}
+        <button class="btn sm" data-ua="pass" data-uid="${u.id}">🔑 Clave</button>
+        ${u.id === me ? '' : `<button class="btn sm danger" data-ua="del" data-uid="${u.id}">Eliminar</button>`}</div>
+    </li>`).join('')}</ul>
+    <div class="sec">Nuevo usuario</div>
+    <form id="newUserForm" autocomplete="off">
+      <label class="f">Nombre y apellido</label><input class="t" id="nuName" required>
+      <label class="f">Usuario (para entrar)</label><input class="t" id="nuUser" autocapitalize="none" spellcheck="false" required placeholder="ej.: jperez">
+      <label class="f">Clave inicial (mínimo 6)</label><input class="t" id="nuPass" type="text" autocomplete="off" required>
+      <label class="f">Rol</label>
+      <select class="filter" id="nuRole"><option value="user">Operario (escanea ingresos y salidas)</option><option value="admin">Administrador (todo)</option></select>
+      <button class="btn primary" type="submit">➕ Crear usuario</button>
+    </form>`);
+}
+async function userAction(act, uid){
+  const u = Auth.conf.users.find(x => x.id === uid); if(!u) return;
+  const lastAdmin = c => c.users.filter(x => x.role === 'admin' && x.active).length <= 1;
+  try{
+    if(act === 'toggle') await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); if(x.active && x.role === 'admin' && lastAdmin(c)) return 'Debe quedar al menos un administrador activo.'; x.active = !x.active; x.rev = (x.rev || 0) + 1; });
+    else if(act === 'kick') await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); x.rev = (x.rev || 0) + 1; });
+    else if(act === 'role') await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); if(x.role === 'admin' && lastAdmin(c)) return 'Debe quedar al menos un administrador activo.'; x.role = x.role === 'admin' ? 'user' : 'admin'; });
+    else if(act === 'del'){
+      if(!confirm(`¿Eliminar a ${u.name}? Ya no podrá entrar. (Sus registros en el Excel se conservan.)`)) return;
+      await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); if(x.role === 'admin' && lastAdmin(c)) return 'Debe quedar al menos un administrador activo.'; c.users = c.users.filter(y => y.id !== uid); });
+    }
+    else if(act === 'pass'){
+      const p = prompt(`Nueva clave para ${u.name} (mínimo 6 caracteres):`); if(p == null) return;
+      if(p.length < 6) return toast('La clave debe tener al menos 6 caracteres');
+      const salt = rndHex(16), hash = await hashPass(p, salt);
+      // cambiar la clave de otro también cierra su sesión actual
+      await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); x.salt = salt; x.hash = hash; if(uid !== Auth.session.id) x.rev = (x.rev || 0) + 1; });
+    }
+    toast('✅ Guardado'); openUsers();
+  } catch(e){ toast('⚠ ' + e.message, 5000); }
 }
 
 /* =====================================================================
@@ -925,7 +1160,7 @@ function candidates(raw, ocr){
 /* ---- Registro de ingreso / salida ---- */
 // Quién escaneó: el nombre que el operario puso en este celular; si no lo puso, el modelo del celular.
 // Nunca la cuenta compartida (escaner.vin), que es la misma para todos.
-function who(){ return cfg.operator || (cfg.device ? (/^(PC|Mac)/.test(cfg.device) ? '' : 'Celular ') + cfg.device : 'Celular sin nombre'); }
+function who(){ return (S.mode === 'graph' && Auth.session?.name) || cfg.operator ||(cfg.device ? (/^(PC|Mac)/.test(cfg.device) ? '' : 'Celular ') + cfg.device : 'Celular sin nombre'); }
 function doIn(e){ e.found = true; e.exited = false; e.ingresoAt = new Date(); e.salidaAt = null; e.opIn = who(); e.opOut = ''; persist(e); }
 function doOut(e){ e.found = true; e.exited = true; e.salidaAt = new Date(); e.opOut = who(); persist(e); }
 function undoOut(e){ e.exited = false; e.salidaAt = null; e.opOut = ''; persist(e); }
@@ -1060,7 +1295,8 @@ function afterLoad(quiet){
   const sinVin = S.files.filter(f => !f.entries.length);
   if(sinVin.length && !S.history) banner('No encontré la columna de VIN/CHASIS en: <b>' + sinVin.map(f => esc(f.name)).join(', ') + '</b>. Revisa que tenga un encabezado “VIN”, “CHASIS” o “SERIE”.');
   renderAll();
-  if(!quiet && !cfg.operator && !cfg.askedOp) askOperator();
+  if(!quiet && S.mode === 'local' && !cfg.operator && !cfg.askedOp) askOperator();
+  renderUser();
 }
 function renderMode(){
   const m = cfg.scanMode === 'out' ? 'out' : 'in';
@@ -1230,6 +1466,7 @@ function timesHtml(e){
 }
 
 function handleRead(raw, source){
+  if(!checkSession()) return { kind: 'none' };
   const r = lookup(raw, source);
   if(r.kind === 'none') return r;
   if(r.kind === 'notvin') return r;
@@ -1259,7 +1496,7 @@ async function openFiles(){
       <div class="muted">${stats(f)}${f.createdDateTime ? ' · subido ' + fmtDate(f.createdDateTime) : ''}</div>
       <div>${f.webUrl ? `<a class="btn sm" href="${esc(f.webUrl)}" target="_blank" rel="noopener">Abrir en Excel</a>` : ''}
       ${f.local ? `<button class="btn sm" data-act="download" data-id="${esc(f.id)}">⬇ Excel sombreado</button><button class="btn sm danger" data-act="closelocal" data-id="${esc(f.id)}">Cerrar</button>`
-                : S.history ? '' : `<button class="btn sm" data-act="archive" data-id="${esc(f.id)}">📁 Archivar</button>`}</div></div>`;
+                : S.history ? '' : `<button class="btn sm adm" data-act="archive" data-id="${esc(f.id)}">📁 Archivar</button>`}</div></div>`;
   if(S.mode === 'local'){
     openSheet(head + `<p class="muted">Modo teléfono · el progreso se guarda en este equipo. Puedes tener varios Excel abiertos a la vez, aunque tengan formatos distintos.</p>
       ${S.files.map(card).join('')}
@@ -1272,7 +1509,7 @@ async function openFiles(){
   openSheet(head + (S.history ? `<p class="muted">Consultando el Historial.</p><button class="btn primary" data-act="current">Volver a los activos</button>` : '') + `
       <p class="muted">Todos los Excel de la carpeta “${esc(S.folder?.name)}” están <b>activos a la vez</b>, aunque tengan formatos distintos. Un manifiesto pasa solo a “${CONFIG.historyFolder}” cuando salen todos sus vehículos, o con el botón Archivar.</p>
       ${S.files.map(card).join('')}
-      ${S.history ? '' : `<button class="btn primary" data-act="upload">⬆ Subir otro manifiesto</button>
+      ${S.history ? '' : `<button class="btn primary adm" data-act="upload">⬆ Subir otro manifiesto</button>
       <button class="btn" data-act="refresh">↻ Revisar carpeta ahora</button>`}
       <button class="btn" data-act="csv">⬇ Reporte CSV</button>
       <div class="sec">${CONFIG.historyFolder}</div><div id="histList" class="muted"><span class="spinner"></span>Cargando…</div>`);
@@ -1283,38 +1520,56 @@ async function openFiles(){
 }
 
 function openSettings(){
+  // operario (o antes de iniciar sesión): solo preferencias de este celular
+  if(S.mode === 'graph' && !isAdmin()){
+    openSheet(`<h3>Ajustes <button data-act="close">✕</button></h3>
+      <label class="f"><input type="checkbox" id="sSound" ${cfg.sound ? 'checked' : ''}> Sonido y vibración</label>
+      ${+cfg.custodyDays ? `<p class="muted">Días de custodia: <b>${+cfg.custodyDays}</b> (lo define el administrador).</p>` : ''}
+      <button class="btn primary" data-act="saveCfg">Guardar</button>
+      ${Auth.session ? '<button class="btn danger" data-act="applogout">Cerrar sesión</button>' : ''}`);
+    return;
+  }
+  const global = S.mode === 'graph' ? '<p class="muted">Se aplica a <b>todos los celulares</b>.</p>' : '';
   openSheet(`<h3>Ajustes <button data-act="close">✕</button></h3>
-    <label class="f">Carpeta de OneDrive (ruta o enlace compartido de la carpeta)</label>
-    <input class="t" id="sFolder" value="${esc(cfg.folder)}">
-    <p class="muted">Ej.: <code>Escaneo VIN</code> o pega el enlace “Compartir” de una carpeta de OneDrive/SharePoint para que todo el equipo use la misma.</p>
+    ${S.mode === 'graph' ? '<div class="sec">Generales (administrador)</div>' : ''}
     <label class="f">Días de custodia contratados (n)</label>
     <input class="t" id="sDays" type="number" min="0" inputmode="numeric" value="${+cfg.custodyDays || 0}">
     <p class="muted">Cuenta desde el día de ingreso (ese día es el día 1). Al pasar de <i>n</i> días el vehículo aparece como <b>VENCIDO</b>. 0 = sin alerta.</p>
     <label class="f">Color de la fila al INGRESAR / al SALIR</label>
     <div class="row"><input type="color" id="sColor" value="${esc(cfg.color)}" style="width:60px;height:40px;border:0;background:none">
       <input type="color" id="sColorOut" value="${esc(cfg.colorOut)}" style="width:60px;height:40px;border:0;background:none"><span class="muted">verde / azul</span></div>
+    ${global}
+    <div class="sec">Este celular</div>
     <label class="f"><input type="checkbox" id="sSound" ${cfg.sound ? 'checked' : ''}> Sonido y vibración</label>
-    <label class="f">Nombre del operario que usa este celular</label>
-    <input class="t" id="sOp" value="${esc(cfg.operator)}" placeholder="Ej.: Juan Pérez">
-    <p class="muted">Se guarda en este celular y queda en la columna OPERARIO del Excel en cada ingreso y salida.</p>
-    <div class="sec">Conexión Microsoft 365</div>
+    ${S.mode === 'local' ? `<label class="f">Nombre del operario que usa este celular</label>
+      <input class="t" id="sOp" value="${esc(cfg.operator)}" placeholder="Ej.: Juan Pérez">` : ''}
+    <div class="sec">Conexión</div>
+    <label class="f">Carpeta de OneDrive (ruta o enlace compartido de la carpeta)</label>
+    <input class="t" id="sFolder" value="${esc(cfg.folder)}">
+    <p class="muted">Ej.: <code>Escaneo VIN</code> o pega el enlace “Compartir” de una carpeta de OneDrive/SharePoint para que todo el equipo use la misma.</p>
     <label class="f">Client ID (Azure / Entra ID)</label>
     <input class="t" id="sClient" value="${esc(cfg.clientId)}" placeholder="00000000-0000-0000-0000-000000000000">
     <label class="f">Tenant</label>
     <input class="t" id="sTenant" value="${esc(cfg.tenant)}">
     <p class="muted">URL de redirección a registrar: <code>${esc(location.origin + location.pathname)}</code></p>
     <button class="btn primary" data-act="saveCfg">Guardar</button>
-    ${S.account ? `<button class="btn danger" data-act="logout">Cerrar sesión (${esc(S.account.username)})</button>` : ''}`);
+    ${S.account ? `<button class="btn danger" data-act="logout">Desconectar Microsoft 365 de este celular (${esc(S.account.username)})</button>
+      <p class="muted">Después habrá que volver a escribir la clave de la cuenta de Microsoft. Para salir solo tú, usa 👤 → Cerrar sesión.</p>` : ''}`);
 }
-function saveSettings(){
-  const old = JSON.stringify([cfg.folder, cfg.clientId, cfg.tenant, cfg.color, cfg.colorOut]);
-  cfg.folder = $('#sFolder').value.trim() || CONFIG.folder;
-  cfg.color = $('#sColor').value.toUpperCase();
-  cfg.colorOut = $('#sColorOut').value.toUpperCase();
-  cfg.custodyDays = Math.max(0, parseInt($('#sDays').value, 10) || 0);
+async function saveSettings(){
   cfg.sound = $('#sSound').checked;
-  cfg.operator = $('#sOp').value.trim(); cfg.askedOp = true;
+  if(S.mode === 'graph' && !isAdmin()){ store.set('vin_cfg', cfg); closeSheet(); return toast('Ajustes guardados'); }
+  const old = JSON.stringify([cfg.folder, cfg.clientId, cfg.tenant, cfg.color, cfg.colorOut]);
+  const g = { custodyDays: Math.max(0, parseInt($('#sDays').value, 10) || 0), color: $('#sColor').value.toUpperCase(), colorOut: $('#sColorOut').value.toUpperCase() };
+  cfg.folder = $('#sFolder').value.trim() || CONFIG.folder;
+  if($('#sOp')){ cfg.operator = $('#sOp').value.trim(); cfg.askedOp = true; }
   cfg.clientId = $('#sClient').value.trim(); cfg.tenant = $('#sTenant').value.trim() || 'organizations';
+  Object.assign(cfg, g);
+  // los ajustes generales se guardan en vin-config.json para que lleguen a todos los celulares
+  if(S.mode === 'graph' && Auth.conf){
+    try{ await saveAppConfig(c => { c.settings = Object.assign(c.settings || {}, g); }); }
+    catch(e){ return toast('⚠ No se pudo guardar: ' + e.message, 5000); }
+  }
   store.set('vin_cfg', cfg); closeSheet();
   if(old !== JSON.stringify([cfg.folder, cfg.clientId, cfg.tenant, cfg.color, cfg.colorOut])) location.reload();
   else { toast('Ajustes guardados'); if(S.entries.length) renderAll(); }
@@ -1489,7 +1744,11 @@ const Scan = {
 };
 
 /* ------------------------------ eventos ------------------------------ */
-$('#btnScan').onclick = () => { beep('none'); if(!cfg.operator && !cfg.askedOp) askOperator(() => Scan.open()); else Scan.open(); };
+$('#btnScan').onclick = () => {
+  beep('none');
+  if(!checkSession()) return;
+  if(S.mode === 'local' && !cfg.operator && !cfg.askedOp) askOperator(() => Scan.open()); else Scan.open();
+};
 $('#scClose').onclick = $('#scDone').onclick = () => Scan.close();
 $('#scOcr').onclick = () => Scan.ocr();
 $('#scTorch').onclick = () => Scan.torch();
@@ -1509,16 +1768,55 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => { S.tab
 $('#list').onclick = ev => { const li = ev.target.closest('li[data-id]'); if(li){ const e = S.entries.find(x => x.id === li.dataset.id); if(e) openDetail(e); } };
 $('#fileChip').onclick = () => openFiles();
 $('#btnSettings').onclick = () => openSettings();
+$('#btnUser').onclick = () => openUserMenu();
+$('#loginForm').onsubmit = async ev => {
+  ev.preventDefault();
+  const b = $('#lgBtn'); b.disabled = true; b.textContent = 'Verificando…'; $('#lgMsg').textContent = '';
+  try{ await doLogin($('#lgUser').value, $('#lgPass').value); }
+  catch(e){ $('#lgMsg').textContent = e.message; if(!Auth.session) show('appLogin'); }
+  finally{ b.disabled = false; b.textContent = 'Entrar'; }
+};
+$('#setupForm').onsubmit = async ev => {
+  ev.preventDefault();
+  const name = $('#suName').value.trim(), user = normUser($('#suUser').value), p = $('#suPass').value;
+  if(p.length < 6) return $('#suMsg').textContent = 'La clave debe tener al menos 6 caracteres.';
+  if(p !== $('#suPass2').value) return $('#suMsg').textContent = 'Las claves no coinciden.';
+  try{
+    await loadAppConfig();
+    if(Auth.conf && Auth.conf.users.length) return showLogin('Ya existe un administrador. Inicia sesión.');
+    const admin = await makeUser(name, user, p, 'admin');
+    await saveAppConfig(c => { c.users = [admin]; c.settings = { custodyDays: +cfg.custodyDays || 0, color: cfg.color, colorOut: cfg.colorOut }; });
+    Auth.session = { id: admin.id, user: admin.user, name: admin.name, role: 'admin', rev: 0, at: Date.now() };
+    store.set('vin_session', Auth.session);
+    toast('✅ Administrador creado'); await enterApp();
+  } catch(e){ $('#suMsg').textContent = e.message; }
+};
+// formulario "Nuevo usuario" (está dentro del panel, por eso se escucha en el documento)
+document.addEventListener('submit', async ev => {
+  if(ev.target.id !== 'newUserForm') return;
+  ev.preventDefault();
+  if(!isAdmin()) return;
+  const name = $('#nuName').value.trim(), user = normUser($('#nuUser').value), p = $('#nuPass').value, role = $('#nuRole').value;
+  if(!name || !user) return toast('Completa nombre y usuario');
+  if(p.length < 6) return toast('La clave debe tener al menos 6 caracteres');
+  try{
+    const nu = await makeUser(name, user, p, role);
+    await saveAppConfig(c => { if(c.users.some(x => x.user === nu.user)) return `El usuario “${nu.user}” ya existe.`; c.users.push(nu); });
+    toast(`✅ Usuario ${nu.user} creado`); openUsers();
+  } catch(e){ toast('⚠ ' + e.message, 5000); }
+});
 $('#btnLocal').onclick = () => $('#fileLocal').click();
 $('#btnLogin').onclick = () => login();
 $('#fileLocal').onchange = ev => { const fl = [...ev.target.files]; ev.target.value = ''; if(fl.length){ closeSheet(); openLocal(fl); } };
 $('#fileUpload').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; if(f){ closeSheet(); uploadManifest(f); } };
 $('#sheet').onclick = ev => { if(ev.target.id === 'sheet') closeSheet(); };
 document.addEventListener('click', async ev => {
-  const t = ev.target.closest('[data-act],[data-pick],[data-do],[data-hist],[data-mode]'); if(!t) return;
+  const t = ev.target.closest('[data-act],[data-pick],[data-do],[data-hist],[data-mode],[data-ua]'); if(!t) return;
   if(t.dataset.mode){ cfg.scanMode = t.dataset.mode; store.set('vin_cfg', cfg); $('#result').classList.add('hidden'); renderMode(); toast(t.dataset.mode === 'out' ? '⬆ Modo SALIDA' : '⬇ Modo INGRESO'); return; }
   if(t.dataset.pick){ closeSheet(); pick(t.dataset.pick); return; }
+  if(t.dataset.ua){ await userAction(t.dataset.ua, t.dataset.uid); return; }
   if(t.dataset.do){
+    if(!checkSession()) return;
     const e = S.entries.find(x => x.id === t.dataset.id); closeSheet(); if(!e) return;
     const d = t.dataset.do;
     if(d === 'in'){ doIn(e); renderResult({ kind:'ok', vin: e.vin, list:[e] }); feedback('ok'); }
@@ -1531,12 +1829,22 @@ document.addEventListener('click', async ev => {
   if(t.dataset.hist){ closeSheet(); try{ await openHistory(t.dataset.hist); } catch(e){ errorScreen(e); } return; }
   const a = t.dataset.act;
   if(a === 'close') closeSheet();
-  else if(a === 'upload') $('#fileUpload').click();
+  else if(a === 'upload'){ if(isAdmin()) $('#fileUpload').click(); else toast('Solo el administrador puede subir manifiestos'); }
+  else if(a === 'users'){ openUsers(); }
+  else if(a === 'applogout'){ closeSheet(); logoutApp(); }
+  else if(a === 'mypass'){
+    const p = prompt('Nueva clave (mínimo 6 caracteres):'); if(p == null) return;
+    if(p.length < 6) return toast('La clave debe tener al menos 6 caracteres');
+    const salt = rndHex(16), hash = await hashPass(p, salt), me = Auth.session.id;
+    try{ await saveAppConfig(c => { const x = c.users.find(y => y.id === me); if(!x) return 'Usuario no encontrado'; x.salt = salt; x.hash = hash; }); closeSheet(); toast('✅ Clave cambiada'); }
+    catch(e){ toast('⚠ ' + e.message, 5000); }
+  }
   else if(a === 'refresh'){ closeSheet(); try{ await refreshFolder(); } catch(e){ errorScreen(e); } }
   else if(a === 'current'){ closeSheet(); banner(''); S.history = null; S.files = []; rebuild(); try{ await refreshFolder({ initial: true }); } catch(e){ errorScreen(e); } }
   else if(a === 'download'){ closeSheet(); const f = S.fileMap[t.dataset.id]; if(f) downloadMarked(f); }
   else if(a === 'closelocal'){ closeSheet(); const f = S.fileMap[t.dataset.id]; if(f) closeLocal(f); }
   else if(a === 'archive'){
+    if(!isAdmin()) return toast('Solo el administrador puede archivar');
     const f = S.fileMap[t.dataset.id]; if(!f) return;
     const pend = f.entries.filter(e => !e.exited).length;
     if(!confirm(`¿Archivar ${f.name}?` + (pend ? `\n\nTodavía tiene ${pend} vehículo(s) sin salida. Seguirá guardado en ${CONFIG.historyFolder}.` : ''))) return;
@@ -1563,9 +1871,11 @@ async function startGraph(){
   S.mode = 'graph';
   loading('Conectando con OneDrive…');
   S.folder = await resolveFolder();
-  await refreshFolder({ initial: true });
-  flushQueue();
-  setInterval(() => { if(!document.hidden && !Scan.running) refreshFolder().catch(e => setSync('err', e.message)); }, CONFIG.pollSeconds * 1000);
+  try{ await loadAppConfig(); }
+  catch(e){ Auth.conf = store.get('vin_conf_cache', null); if(!Auth.conf) throw e; applyGlobalSettings(); }   // sin señal
+  if(!Auth.conf || !Auth.conf.users.length){ Auth.session = null; store.set('vin_session', null); renderUser(); show('setup'); $('#fileChip').textContent = 'Configuración inicial'; return; }
+  if(!Auth.session || !sessionValid()){ Auth.session = null; store.set('vin_session', null); renderUser(); return showLogin(); }
+  await enterApp();
 }
 
 (async function init(){
@@ -1577,7 +1887,8 @@ async function startGraph(){
       await initMsal();
       if(S.account && mode !== 'local') return await startGraph();
     }
-    if(mode === 'local'){
+    $('#localBox').classList.toggle('hidden', !CONFIG.allowLocalMode);
+    if(mode === 'local' && CONFIG.allowLocalMode){
       let list = await idb.get('localFiles');
       if(!list || !list.length){ const last = await idb.get('lastLocal'); list = last ? [last] : []; }   // versión anterior
       if(list.length) return await openLocal(list, true);
