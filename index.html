@@ -101,6 +101,13 @@ ul.list li.late{border-left:6px solid var(--bad)}
 .result.out .st{color:var(--blue)}
 .times{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin-top:8px;font-size:15px}
 .times dt{color:var(--muted)} .times dd{margin:0;font-weight:700}
+/* Unidad de salida (cigüeña / camabaja) */
+.unitbar{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:2px dashed var(--out);background:var(--card);border-radius:14px;padding:10px 12px;margin-bottom:10px}
+.unitbar.set{border-style:solid}
+.unitbar .grow{flex:1;min-width:0}
+.unitbar .pl{font-family:ui-monospace,Consolas,monospace;font-weight:800;font-size:18px}
+.unitbar .meta{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.unitbar .chg{font-size:13px;font-weight:700;color:var(--out);white-space:nowrap}
 /* Usuarios */
 body:not(.admin) .adm{display:none!important}
 body.admin .only-user{display:none!important}
@@ -201,6 +208,8 @@ input.t{width:100%;border:1px solid var(--line);background:var(--card);border-ra
       <button class="btn primary" type="submit" id="lgBtn">Entrar</button>
     </form>
     <p id="lgMsg" class="muted" style="color:var(--bad)"></p>
+    <button class="btn" type="button" data-act="recover" style="border:0;background:none;color:var(--brand);margin-top:0">¿Olvidaste tu clave? (administradores)</button>
+    <p class="muted">Operarios: pide al administrador que te cambie la clave.</p>
   </section>
 
   <!-- primera vez: crear el administrador -->
@@ -210,6 +219,7 @@ input.t{width:100%;border:1px solid var(--line);background:var(--card);border-ra
     <form id="setupForm" autocomplete="off">
       <label class="f">Nombre y apellido</label><input class="t" id="suName" required>
       <label class="f">Usuario</label><input class="t" id="suUser" autocapitalize="none" spellcheck="false" required>
+      <label class="f">Correo (para recuperar la clave)</label><input class="t" id="suMail" type="email" autocomplete="email" required>
       <label class="f">Clave (mínimo 6 caracteres)</label><input class="t" id="suPass" type="password" autocomplete="new-password" required>
       <label class="f">Repetir clave</label><input class="t" id="suPass2" type="password" autocomplete="new-password" required>
       <button class="btn primary" type="submit">Crear administrador</button>
@@ -240,6 +250,7 @@ input.t{width:100%;border:1px solid var(--line);background:var(--card);border-ra
       <button data-mode="in">⬇ INGRESO</button>
       <button data-mode="out">⬆ SALIDA</button>
     </div>
+    <button id="unitBar" class="unitbar hidden" data-act="unitpick"></button>
     <button id="btnScan" class="scan">📷 Escanear VIN</button>
     <form id="manual" class="manual" autocomplete="off">
       <input id="q" placeholder="VIN o últimos dígitos" autocapitalize="characters" spellcheck="false" inputmode="text">
@@ -295,6 +306,7 @@ const CONFIG = {
   superAdmin: 'eliopetit',            // super-administrador: puede todo y nadie puede eliminarlo ni desactivarlo
   custodyDays: 0,                     // días de custodia contratados (0 = sin alerta); el administrador lo cambia en Ajustes
   allowLocalMode: false,              // "Abrir Excel desde este teléfono" (sin usuarios): desactivado para que todos pasen por el login
+  unitsFilePattern: /CIGUE[ÑN]AS?|CAMABAJAS?/i,   // listado de conductores/unidades (no es un manifiesto)
   pollSeconds: 45
 };
 
@@ -341,9 +353,11 @@ function nowTxt(d = new Date()){ return d.toLocaleString('es-PE', {day:'2-digit'
 const TRACK = [
   ['inD',  'FECHA INGRESO'], ['inT',  'HORA INGRESO'], ['opIn',  'OPERARIO INGRESO'],
   ['outD', 'FECHA SALIDA'],  ['outT', 'HORA SALIDA'],  ['opOut', 'OPERARIO SALIDA'],
-  ['days', 'DÍAS CUSTODIA']
+  ['days', 'DÍAS CUSTODIA'],
+  // unidad de transporte (cigüeña / camabaja) en la que salió el vehículo
+  ['plate', 'PLACA SALIDA'], ['driver', 'CONDUCTOR'], ['dni', 'DNI CONDUCTOR'], ['company', 'TRANSPORTISTA']
 ];
-const FMTS = { inD:'dd/mm/yyyy', inT:'hh:mm', opIn:'@', outD:'dd/mm/yyyy', outT:'hh:mm', opOut:'@', days:'0' };
+const FMTS = { inD:'dd/mm/yyyy', inT:'hh:mm', opIn:'@', outD:'dd/mm/yyyy', outT:'hh:mm', opOut:'@', days:'0', plate:'@', driver:'@', dni:'@', company:'@' };
 const DT_FMT = 'dd/mm/yyyy hh:mm';
 // lee una hora de Excel (fracción del día) y devuelve minutos desde medianoche
 function cellMinutes(c){
@@ -549,6 +563,8 @@ async function parseWorkbook(buf){
       if(!track.opIn && legacy.op){ const o = r.vals[legacy.op] || ''; opIn = (o.match(/Ing:\s*([^·]+)/) || [,''])[1].trim(); opOut = (o.match(/Sal:\s*(.+)$/) || [,''])[1].trim(); }
       entries.push({ id: ws.name + '!' + r.rn, vin: v, sheet: ws.name, row: r.rn, vals: r.vals,
         found, exited, ingresoAt, salidaAt, opIn, opOut,
+        plate: track.plate ? (r.vals[track.plate] || '') : '', driver: track.driver ? (r.vals[track.driver] || '') : '',
+        dni: track.dni ? (r.vals[track.dni] || '') : '', company: track.company ? (r.vals[track.company] || '') : '',
         brand: ((brandCol && r.vals[brandCol]) || brandFromVin(v) || 'SIN MARCA').trim().toUpperCase().replace(/\s+/g, ' '),
         model: ((modelCol && r.vals[modelCol]) || 'SIN MODELO').trim().toUpperCase().replace(/\s+/g, ' '),
         color: ((colorCol && r.vals[colorCol]) || 'SIN COLOR').trim().toUpperCase().replace(/\s+/g, ' '),
@@ -582,10 +598,12 @@ function rebuild(){
   S.vin17 = [...S.index.keys()].filter(v => v.length === 17);
 }
 /* estado de un vehículo, para la cola sin conexión y el modo teléfono */
-function stateOf(e){ return { f: e.found, x: e.exited, i: e.ingresoAt ? +e.ingresoAt : 0, s: e.salidaAt ? +e.salidaAt : 0, oi: e.opIn || '', oo: e.opOut || '' }; }
+function stateOf(e){ return { f: e.found, x: e.exited, i: e.ingresoAt ? +e.ingresoAt : 0, s: e.salidaAt ? +e.salidaAt : 0, oi: e.opIn || '', oo: e.opOut || '',
+  pl: e.plate || '', dr: e.driver || '', dn: e.dni || '', co: e.company || '' }; }
 function applyState(e, st){
   e.found = !!st.f; e.exited = !!st.x; e.ingresoAt = st.i ? new Date(st.i) : null; e.salidaAt = st.s ? new Date(st.s) : null;
   e.opIn = st.oi ?? (st.o || ''); e.opOut = st.oo || '';
+  e.plate = st.pl || ''; e.driver = st.dr || ''; e.dni = st.dn || ''; e.company = st.co || '';
 }
 
 /* Resumen de una fila: campos útiles para mostrar */
@@ -619,6 +637,15 @@ async function initMsal(){
 async function token(){
   try{ return (await msalApp.acquireTokenSilent({ scopes: SCOPES, account: S.account })).accessToken; }
   catch(e){ await msalApp.acquireTokenRedirect({ scopes: SCOPES, account: S.account }); throw new Error('Reautenticando…'); }
+}
+/* envía un correo desde la cuenta conectada (escaner.vin@dief.pe). Requiere el permiso Mail.Send en Azure. */
+async function sendMail(to, subject, html){
+  let tk;
+  try{ tk = (await msalApp.acquireTokenSilent({ scopes: ['Mail.Send'], account: S.account })).accessToken; }
+  catch(e){ throw new Error('Falta el permiso “Mail.Send” en Azure (ver LEEME) o hay que volver a conectar Microsoft 365.'); }
+  const r = await fetch(GRAPH + '/me/sendMail', { method: 'POST', headers: { Authorization: 'Bearer ' + tk, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: { subject, body: { contentType: 'HTML', content: html }, toRecipients: [{ emailAddress: { address: to } }] }, saveToSentItems: false }) });
+  if(!r.ok){ let m = r.status + ''; try{ m += ' ' + ((await r.json()).error?.message || ''); }catch{} throw new Error('No se pudo enviar el correo: ' + m); }
 }
 async function gfetch(path, opts = {}){
   const headers = Object.assign({ Authorization: 'Bearer ' + await token() }, opts.headers || {});
@@ -686,7 +713,10 @@ async function refreshFolder({ initial = false } = {}){
   if(cf && cf.cTag !== Auth.cTag){ await loadAppConfig(); if(S.files.length) renderAll(); }
   if(!checkSession()) return;
   S.hist = kids.find(k => k.folder && k.name.toLowerCase() === CONFIG.historyFolder.toLowerCase()) || null;
-  const items = kids.filter(isXlsx).sort(byNewest);
+  // listado de cigüeñas/camabajas: no es manifiesto; se recarga si cambió
+  const uf = kids.find(k => isXlsx(k) && isUnitsFile(k));
+  if(uf && (!S.unitsFile || S.unitsFile.cTag !== uf.cTag)) await loadUnits(uf);
+  const items = kids.filter(k => isXlsx(k) && !isUnitsFile(k)).sort(byNewest);
   if(S.history){ setSync('ok'); return; }          // consultando el Historial: no se recargan los activos
   if(!items.length){ S.files = []; rebuild(); $('#emptyFolder').textContent = F.name; show('empty'); setSync('ok'); return; }
   const firstLoad = !S.files.length;
@@ -849,9 +879,11 @@ async function hashPass(pass, salt){
   return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 const normUser = u => String(u || '').trim().toLowerCase().replace(/\s+/g, '.');
-async function makeUser(name, user, pass, role){
+const validMail = m => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(m || '').trim());
+const maskMail = m => String(m).replace(/^(.)(.*)(@.*)$/, (_, a, b, d) => a + '*'.repeat(Math.max(2, Math.min(b.length, 6))) + d);
+async function makeUser(name, user, pass, role, email){
   const salt = rndHex(16);
-  return { id: rndHex(8), user: normUser(user), name: name.trim(), role, active: true, rev: 0, salt, hash: await hashPass(pass, salt),
+  return { id: rndHex(8), user: normUser(user), name: name.trim(), email: String(email || '').trim().toLowerCase(), role, active: true, rev: 0, salt, hash: await hashPass(pass, salt),
     created: new Date().toISOString(), createdBy: Auth.session?.name || '' };
 }
 /* ajustes generales que define el administrador y valen para todos los celulares */
@@ -973,6 +1005,10 @@ function openUserMenu(){
     <p class="muted">Usuario <b>${esc(s.user)}</b> · ${roleBadge(s.role)}</p>
     ${s.role === 'super' ? '<p class="muted">Tienes todos los privilegios: administras usuarios y administradores. Nadie puede eliminarte ni desactivarte.</p>' : ''}
     ${isAdmin() ? '<button class="btn primary" data-act="users">👥 Administrar usuarios</button>' : ''}
+    ${isAdmin() ? (() => { const m = sessionUser()?.email; return m
+        ? `<p class="muted">✉️ Correo de recuperación: <b>${esc(m)}</b></p>`
+        : '<p class="muted" style="color:var(--bad)">⚠ No tienes correo de recuperación. Regístralo para poder recuperar tu clave si la olvidas.</p>'; })() +
+      '<button class="btn" data-act="mymail">✉️ Cambiar mi correo de recuperación</button>' : ''}
     <button class="btn" data-act="mypass">🔑 Cambiar mi clave</button>
     <button class="btn danger" data-act="applogout">Cerrar sesión</button>`);
 }
@@ -986,7 +1022,7 @@ function openUsers(){
       ${sup ? '' : 'Como administrador gestionas a los operarios; los administradores los gestiona el super-administrador.'}</p>
     <ul class="list users">${us.map(u => { const r = effRole(u), can = canManage(u); return `<li>
       <div class="grow"><div style="font-weight:700">${esc(u.name)} ${u.id === me ? '<span class="muted">(tú)</span>' : ''}</div>
-        <div class="meta">${esc(u.user)}</div></div>
+        <div class="meta">${esc(u.user)}${u.email ? ' · ✉️ ' + esc(u.email) : (r !== 'user' ? ' · <span style="color:var(--bad)">sin correo</span>' : '')}</div></div>
       ${roleBadge(r)}
       ${u.active || r === 'super' ? '<span class="badge ok">Activo</span>' : '<span class="badge off">Desactivado</span>'}
       <div class="acts">${can ? `
@@ -994,6 +1030,7 @@ function openUsers(){
         ${u.active ? `<button class="btn sm" data-ua="kick" data-uid="${u.id}">🚪 Cerrar sesión</button>` : ''}
         ${sup ? `<button class="btn sm" data-ua="role" data-uid="${u.id}">${r === 'admin' ? 'Hacer operario' : 'Hacer admin'}</button>` : ''}
         <button class="btn sm" data-ua="pass" data-uid="${u.id}">🔑 Clave</button>
+        <button class="btn sm" data-ua="email" data-uid="${u.id}">✉️ Correo</button>
         <button class="btn sm danger" data-ua="del" data-uid="${u.id}">Eliminar</button>` : (r === 'super' && u.id !== me ? '<span class="muted" style="font-size:13px">🔒 Protegido</span>' : '')}</div>
     </li>`; }).join('')}</ul>
     <div class="sec">Nuevo usuario</div>
@@ -1001,6 +1038,7 @@ function openUsers(){
       <label class="f">Nombre y apellido</label><input class="t" id="nuName" required>
       <label class="f">Usuario (para entrar)</label><input class="t" id="nuUser" autocapitalize="none" spellcheck="false" required placeholder="ej.: jperez">
       <label class="f">Clave inicial (mínimo 6)</label><input class="t" id="nuPass" type="text" autocomplete="off" required>
+      <label class="f">Correo (obligatorio para administradores: sirve para recuperar la clave)</label><input class="t" id="nuMail" type="email" autocomplete="off">
       <label class="f">Rol</label>
       <select class="filter" id="nuRole"><option value="user">Operario (escanea ingresos y salidas)</option>${sup ? '<option value="admin">Administrador (sube, archiva y gestiona operarios)</option>' : ''}</select>
       <button class="btn primary" type="submit">➕ Crear usuario</button>
@@ -1021,6 +1059,11 @@ async function userAction(act, uid){
       if(!confirm(`¿Eliminar a ${u.name}? Ya no podrá entrar. (Sus registros en el Excel se conservan.)`)) return;
       await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); const g = guard(c, x); if(g) return g; if(effRole(x) === 'admin' && lastAdmin(c)) return 'Debe quedar al menos un administrador activo.'; c.users = c.users.filter(y => y.id !== uid); });
     }
+    else if(act === 'email'){
+      const m = prompt(`Correo de recuperación de ${u.name}:`, u.email || ''); if(m == null) return;
+      if(m.trim() && !validMail(m)) return toast('El correo no es válido');
+      await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); const g = guard(c, x); if(g) return g; x.email = m.trim().toLowerCase(); });
+    }
     else if(act === 'pass'){
       const p = prompt(`Nueva clave para ${u.name} (mínimo 6 caracteres):`); if(p == null) return;
       if(p.length < 6) return toast('La clave debe tener al menos 6 caracteres');
@@ -1030,6 +1073,193 @@ async function userAction(act, uid){
     }
     toast('✅ Guardado'); openUsers();
   } catch(e){ toast('⚠ ' + e.message, 5000); }
+}
+
+/* ---- Recuperar la clave por correo (solo administradores y super-admin) ---- */
+function openRecovery(step, uid, mail){
+  if(step !== 2){
+    openSheet(`<h3>Recuperar clave <button data-act="close">✕</button></h3>
+      <p class="muted">Solo para administradores. Enviaremos un <b>código de 6 dígitos</b> a tu correo de recuperación. Vence en 15 minutos.</p>
+      <form id="recForm1" autocomplete="off"><label class="f">Tu usuario</label>
+        <input class="t" id="rcUser" autocapitalize="none" spellcheck="false" required value="${esc($('#lgUser').value)}">
+        <button class="btn primary" type="submit" id="rcBtn1">Enviar código</button></form>
+      <p id="rcMsg" class="muted" style="color:var(--bad)"></p>`);
+    return;
+  }
+  openSheet(`<h3>Recuperar clave <button data-act="close">✕</button></h3>
+    <p class="muted">Enviamos un código a <b>${esc(maskMail(mail))}</b>. Revisa también la carpeta de correo no deseado.</p>
+    <form id="recForm2" autocomplete="off" data-uid="${esc(uid)}">
+      <label class="f">Código de 6 dígitos</label><input class="t" id="rcCode" inputmode="numeric" maxlength="6" required autocomplete="one-time-code">
+      <label class="f">Nueva clave (mínimo 6)</label><input class="t" id="rcPass" type="password" autocomplete="new-password" required>
+      <label class="f">Repetir nueva clave</label><input class="t" id="rcPass2" type="password" autocomplete="new-password" required>
+      <button class="btn primary" type="submit" id="rcBtn2">Cambiar clave</button></form>
+    <p id="rcMsg" class="muted" style="color:var(--bad)"></p>`);
+}
+async function sendRecovery(user){
+  await loadAppConfig();
+  const u = Auth.conf?.users.find(x => x.user === normUser(user));
+  if(!u || effRole(u) === 'user') throw new Error('Solo los administradores recuperan la clave por correo. Los operarios deben pedir al administrador que se la cambie.');
+  if(!validMail(u.email)) throw new Error('Ese usuario no tiene correo de recuperación registrado. Pide al super-administrador que te cambie la clave.');
+  if(u.reset?.sent && Date.now() - u.reset.sent < 60000) throw new Error('Ya se envió un código hace menos de 1 minuto. Revisa tu correo.');
+  const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, '0');
+  const salt = rndHex(16), hash = await hashPass(code, salt);
+  await saveAppConfig(c => { const x = c.users.find(y => y.id === u.id); if(!x) return 'Usuario no encontrado'; x.reset = { salt, hash, exp: Date.now() + 15 * 60000, tries: 0, sent: Date.now() }; });
+  try{
+    await sendMail(u.email, 'VIN-EXCEL · Código para restablecer tu clave', `
+      <div style="font-family:Segoe UI,Arial,sans-serif;font-size:15px;color:#111">
+        <p>Hola ${esc(u.name)},</p>
+        <p>Tu código para restablecer la clave de <b>VIN-EXCEL</b> (usuario <b>${esc(u.user)}</b>) es:</p>
+        <p style="font-size:32px;font-weight:800;letter-spacing:6px;margin:16px 0">${code}</p>
+        <p>Vence en 15 minutos. Si no lo pediste, ignora este correo: tu clave no cambia.</p></div>`);
+  } catch(e){
+    await saveAppConfig(c => { const x = c.users.find(y => y.id === u.id); if(x) delete x.reset; }).catch(() => {});
+    throw e;
+  }
+  return u;
+}
+async function confirmRecovery(uid, code, pass){
+  await loadAppConfig();
+  const u = Auth.conf?.users.find(x => x.id === uid), r = u?.reset;
+  if(!r) throw new Error('No hay un código pendiente. Pide uno nuevo.');
+  if(Date.now() > r.exp) throw new Error('El código venció. Pide uno nuevo.');
+  if(r.tries >= 5) throw new Error('Demasiados intentos. Pide un código nuevo.');
+  if((await hashPass(String(code).trim(), r.salt)) !== r.hash){
+    await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); if(x?.reset) x.reset.tries = (x.reset.tries || 0) + 1; });
+    throw new Error(`Código incorrecto. Te quedan ${Math.max(0, 4 - r.tries)} intento(s).`);
+  }
+  const salt = rndHex(16), hash = await hashPass(pass, salt);
+  // la clave nueva también cierra las sesiones abiertas con la clave anterior
+  await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); x.salt = salt; x.hash = hash; delete x.reset; x.rev = (x.rev || 0) + 1; });
+  return u;
+}
+
+/* =====================================================================
+   CIGÜEÑAS Y CAMABAJAS (unidad de transporte en la SALIDA)
+   - Listado: Excel de la carpeta cuyo nombre contiene "CIGUEÑAS" o "CAMABAJAS".
+   - En modo SALIDA se elige una unidad (placa + conductor) y se aplica a todo lo que se escanee.
+   ===================================================================== */
+S.units = []; S.unitsFile = null; S.unit = store.get('vin_unit', null);
+const isUnitsFile = it => CONFIG.unitsFilePattern.test(it.name);
+const normPlate = p => String(p || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const shortCo = c => String(c || '').replace(/^(TRANSPORTES?\s+Y\s+SERVICIOS|LOG[IÍ]STICA\s+Y\s+TRANSPORTES?|TRANSPORTES?|EMPRESA\s+DE\s+TRANSPORTES?)\s+/i, '')
+  .replace(/\s*S\.?\s*A\.?\s*C\.?\s*$|\s*S\.?\s*R\.?\s*L\.?\s*$|\s*E\.?\s*I\.?\s*R\.?\s*L\.?\s*$/i, '').trim();
+async function parseUnits(buf){
+  await loadScript(LIB.exceljs);
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
+  for(const ws of wb.worksheets){
+    const rows = []; ws.eachRow({ includeEmpty: false }, (row, rn) => { const v = []; row.eachCell({ includeEmpty: false }, (c, cn) => { v[cn] = cellText(c).trim(); }); rows.push({ rn, v }); });
+    const hr = rows.slice(0, 20).find(r => r.v.some(x => /PLACA/i.test(normH(x))) && r.v.some(x => /APELLIDO|NOMBRE|CONDUCTOR/i.test(normH(x))));
+    if(!hr) continue;
+    const col = re => hr.v.findIndex(x => x && re.test(normH(x)));
+    const cols = { num: col(/^N[°ºO.]*$|^ITEM$/), name: col(/APELLIDO|NOMBRE/), dni: col(/\bDNI\b|DOCUMENTO/), cargo: col(/CARGO|PUESTO/),
+      plate: col(/PLACA/), tipo: col(/^TIPO\b/), company: col(/RAZON|EMPRESA|TRANSPORTISTA/), lic: col(/LICENCIA/), cat: col(/CATEGOR/) };
+    const list = []; let lastRow = hr.rn, maxNum = 0;
+    for(const r of rows){
+      if(r.rn <= hr.rn) continue;
+      lastRow = Math.max(lastRow, r.rn);
+      const g = k => cols[k] > 0 ? (r.v[cols[k]] || '') : '';
+      if(cols.num > 0 && +g('num')) maxNum = Math.max(maxNum, +g('num'));
+      const name = g('name').replace(/\s+/g, ' ').trim(); if(!name) continue;
+      const plate = /^[-–—\s]*$/.test(g('plate')) ? '' : g('plate').toUpperCase();
+      list.push({ row: r.rn, name, dni: g('dni'), cargo: g('cargo').toUpperCase(), plate, tipo: g('tipo'), company: g('company'), lic: g('lic'), cat: g('cat') });
+    }
+    const used = Object.values(cols).filter(c => c > 0);
+    return { list, sheet: ws.name, headerRow: hr.rn, cols, lastRow, maxNum, minCol: Math.min(...used), maxCol: Math.max(...used) };
+  }
+  return null;
+}
+async function loadUnits(item){
+  try{
+    const meta = await gfetch(`/drives/${S.folder.driveId}/items/${item.id}`);
+    const buf = await (await fetch(meta['@microsoft.graph.downloadUrl'], { cache: 'no-store' })).arrayBuffer();
+    const p = await parseUnits(buf);
+    if(!p) return toast('El listado de cigüeñas no tiene columnas de PLACA y NOMBRE', 5000);
+    S.units = p.list; S.unitsFile = Object.assign({ id: meta.id, name: meta.name, cTag: meta.cTag, webUrl: meta.webUrl }, p);
+  } catch(e){ toast('No se pudo leer el listado de cigüeñas: ' + e.message, 5000); }
+}
+const companies = () => [...new Set(S.units.map(u => u.company).filter(Boolean))].sort();
+function setUnit(u){
+  S.unit = u ? { plate: (u.plate || '').toUpperCase().trim(), driver: (u.driver || '').toUpperCase().replace(/\s+/g, ' ').trim(), dni: (u.dni || '').trim(), company: (u.company || '').trim() } : null;
+  store.set('vin_unit', S.unit); renderMode();
+  if(S.unit) toast(`🚛 Unidad ${S.unit.plate} · ${S.unit.driver}`);
+}
+/* exige una unidad elegida antes de registrar salidas */
+function needUnit(then){ if(cfg.scanMode === 'out' && !S.unit){ openUnitPicker(then); return true; } return false; }
+
+function openUnitPicker(then){
+  S.unitThen = then || null;
+  const cur = S.unit ? `<div class="card" style="margin-bottom:10px"><div class="muted">Unidad actual</div><b>🚛 ${esc(S.unit.plate)} · ${esc(S.unit.driver)}</b>
+      <div class="muted">${esc(shortCo(S.unit.company))}${S.unit.dni ? ' · DNI ' + esc(S.unit.dni) : ''}</div>
+      <button class="btn sm danger" data-act="unitclear">Quitar unidad</button></div>` : '';
+  openSheet(`<h3>🚛 Cigüeña / camabaja de salida <button data-act="close">✕</button></h3>
+    ${cur}
+    <input class="filter" id="unitQ" placeholder="Buscar placa, conductor o DNI…" autocomplete="off" autocapitalize="characters">
+    <ul class="list" id="unitList"></ul>
+    <div class="sec">No está en el listado: escribir a mano</div>
+    <form id="unitManual" autocomplete="off">
+      <div class="row" style="gap:8px"><div style="flex:1"><label class="f">Placa</label><input class="t" id="umPlate" required autocapitalize="characters" placeholder="ABC123"></div>
+        <div style="flex:1"><label class="f">DNI (opcional)</label><input class="t" id="umDni" inputmode="numeric"></div></div>
+      <label class="f">Conductor (apellidos y nombres)</label><input class="t" id="umDriver" required autocapitalize="characters">
+      <label class="f">Transportista</label>
+      <select class="filter" id="umCo"><option value="">—</option>${companies().map(c => `<option>${esc(c)}</option>`).join('')}<option value="__otra">Otra…</option></select>
+      <input class="t hidden" id="umCoOther" placeholder="Razón social">
+      ${isAdmin() && S.unitsFile ? '<label class="f"><input type="checkbox" id="umSave"> Agregarlo también al listado</label>' : ''}
+      <button class="btn primary" type="submit">Usar esta unidad</button>
+    </form>
+    ${isAdmin() && S.unitsFile ? '<button class="btn" data-act="unitadd">➕ Agregar conductor / unidad al listado</button>' : ''}
+    ${S.unitsFile ? `<p class="muted">Listado: ${esc(S.unitsFile.name)} · ${S.units.length} personas</p>` : '<p class="muted">No se encontró el listado de cigüeñas en la carpeta.</p>'}`);
+  renderUnitList('');
+  setTimeout(() => $('#unitQ')?.focus(), 150);
+}
+function renderUnitList(q){
+  const k = normH(q), kp = normPlate(q);
+  const drivers = S.units.filter(u => !/AYUDANTE/.test(u.cargo));
+  const items = drivers.filter(u => !k || normH(u.name).includes(k) || (kp && normPlate(u.plate).includes(kp)) || (u.dni && u.dni.includes(q.trim())))
+    .sort((a, b) => (!a.plate - !b.plate) || a.name.localeCompare(b.name)).slice(0, 60);
+  $('#unitList').innerHTML = items.map(u => `<li data-unit="${u.row}" style="cursor:pointer"><div class="grow">
+      <div class="vin">${u.plate ? esc(u.plate) : '<span class="muted">sin placa</span>'}</div>
+      <div class="meta">${esc(u.name)} · ${esc(shortCo(u.company))}${u.tipo ? ' · ' + esc(u.tipo) : ''}</div></div>
+      <span class="badge">${u.dni ? 'DNI ' + esc(u.dni) : ''}</span></li>`).join('') || '<li class="muted">Sin coincidencias: escríbelo a mano abajo.</li>';
+}
+function pickUnitFromList(row){
+  const u = S.units.find(x => x.row === +row); if(!u) return;
+  let plate = u.plate;
+  if(!plate){ plate = (prompt(`${u.name} no tiene placa en el listado.\nEscribe la placa de la unidad:`) || '').trim(); if(!plate) return; }
+  finishUnit({ plate, driver: u.name, dni: u.dni, company: u.company });
+}
+function finishUnit(u){ setUnit(u); closeSheet(); const t = S.unitThen; S.unitThen = null; if(t) t(); }
+
+/* agrega una fila al listado (solo administradores) */
+async function appendUnit(rec){
+  if(!isAdmin()) throw new Error('Solo un administrador puede modificar el listado');
+  const F = S.unitsFile; if(!F) throw new Error('No hay listado');
+  await loadUnits({ id: F.id });                     // versión más reciente, para no pisar otra fila
+  const U = S.unitsFile, row = U.lastRow + 1, vals = [];
+  for(let c = U.minCol; c <= U.maxCol; c++){
+    const k = Object.keys(U.cols).find(key => U.cols[key] === c);
+    vals.push(k === 'num' ? U.maxNum + 1 : k ? (rec[k] ?? '') : '');
+  }
+  const ws = `/drives/${S.folder.driveId}/items/${U.id}/workbook/worksheets('${encodeURIComponent(U.sheet.replace(/'/g, "''"))}')`;
+  await gfetch(`${ws}/range(address='${colLetter(U.minCol)}${row}:${colLetter(U.maxCol)}${row}')`, { method: 'PATCH', json: { values: [vals] } });
+  await loadUnits({ id: U.id });
+}
+function openUnitAdd(){
+  if(!isAdmin()) return;
+  openSheet(`<h3>➕ Agregar al listado <button data-act="close">✕</button></h3>
+    <p class="muted">Se agrega una fila al final de <b>${esc(S.unitsFile?.name || '')}</b>.</p>
+    <form id="unitAddForm" autocomplete="off">
+      <label class="f">Apellidos y nombres</label><input class="t" id="uaName" required autocapitalize="characters">
+      <div class="row" style="gap:8px"><div style="flex:1"><label class="f">DNI</label><input class="t" id="uaDni" inputmode="numeric"></div>
+        <div style="flex:1"><label class="f">Cargo</label><select class="filter" id="uaCargo"><option>CONDUCTOR</option><option>AYUDANTE</option></select></div></div>
+      <div class="row" style="gap:8px"><div style="flex:1"><label class="f">Placa tracto</label><input class="t" id="uaPlate" autocapitalize="characters"></div>
+        <div style="flex:1"><label class="f">Tipo</label><select class="filter" id="uaTipo"><option>LOCAL</option><option>PROVINCIA</option></select></div></div>
+      <label class="f">Razón social</label>
+      <select class="filter" id="uaCo">${companies().map(c => `<option>${esc(c)}</option>`).join('')}<option value="__otra">Otra…</option></select>
+      <input class="t hidden" id="uaCoOther" placeholder="Razón social">
+      <div class="row" style="gap:8px"><div style="flex:1"><label class="f">Licencia</label><input class="t" id="uaLic" autocapitalize="characters"></div>
+        <div style="flex:1"><label class="f">Categoría</label><input class="t" id="uaCat" autocapitalize="characters" placeholder="A3C"></div></div>
+      <button class="btn primary" type="submit">Guardar en el listado</button>
+    </form>`);
 }
 
 /* =====================================================================
@@ -1102,10 +1332,10 @@ function saveBlob(blob, name){ const a = document.createElement('a'); a.href = U
 function exportCsv(){
   const q = v => '"' + String(v ?? '').replace(/"/g,'""') + '"';
   const hhmm = d => d ? d.toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit', hour12:false }) : '';
-  const lines = [['Manifiesto','VIN','Marca','Modelo','Color','Estado','Fecha ingreso','Hora ingreso','Operario ingreso','Fecha salida','Hora salida','Operario salida','Días custodia','Vence','Vencido','Hoja','Fila','Detalle'].map(q).join(';')];
+  const lines = [['Manifiesto','VIN','Marca','Modelo','Color','Estado','Fecha ingreso','Hora ingreso','Operario ingreso','Fecha salida','Hora salida','Operario salida','Placa salida','Conductor','DNI conductor','Transportista','Días custodia','Vence','Vencido','Hoja','Fila','Detalle'].map(q).join(';')];
   for(const e of S.entries.filter(inView)) lines.push([shortName(e.fileName), e.vin, e.brand, e.model, e.color, e.exited ? 'SALIÓ' : e.found ? 'EN ALMACÉN' : 'POR LLEGAR',
     e.ingresoAt ? fmtD(e.ingresoAt) : '', hhmm(e.ingresoAt), e.opIn || '',
-    e.salidaAt ? fmtD(e.salidaAt) : '', hhmm(e.salidaAt), e.opOut || '',
+    e.salidaAt ? fmtD(e.salidaAt) : '', hhmm(e.salidaAt), e.opOut || '', e.plate || '', e.driver || '', e.dni || '', e.company || '',
     custody(e) ?? '', dueDate(e) ? fmtD(dueDate(e)) : '', isLate(e) ? 'SÍ' : '', e.sheet, e.row, rowSummary(e)].map(q).join(';'));
   for(const x of S.extras) lines.push(['', x.vin, '', '', '', 'NO EN MANIFIESTO', x.at, '', x.src, '', '', '', '', '', '', '', '', ''].map(q).join(';'));
   saveBlob(new Blob(['﻿' + lines.join('\r\n')], { type:'text/csv;charset=utf-8' }), 'Reporte VIN ' + new Date().toISOString().slice(0, 10) + '.csv');
@@ -1195,9 +1425,14 @@ function candidates(raw, ocr){
 // Nunca la cuenta compartida (escaner.vin), que es la misma para todos.
 function who(){ return (S.mode === 'graph' && Auth.session?.name) || cfg.operator ||(cfg.device ? (/^(PC|Mac)/.test(cfg.device) ? '' : 'Celular ') + cfg.device : 'Celular sin nombre'); }
 function doIn(e){ e.found = true; e.exited = false; e.ingresoAt = new Date(); e.salidaAt = null; e.opIn = who(); e.opOut = ''; persist(e); }
-function doOut(e){ e.found = true; e.exited = true; e.salidaAt = new Date(); e.opOut = who(); persist(e); }
-function undoOut(e){ e.exited = false; e.salidaAt = null; e.opOut = ''; persist(e); }
-function undoIn(e){ e.found = false; e.exited = false; e.ingresoAt = null; e.salidaAt = null; e.opIn = ''; e.opOut = ''; persist(e); }
+function doOut(e){
+  e.found = true; e.exited = true; e.salidaAt = new Date(); e.opOut = who();
+  const u = S.unit || {}; e.plate = u.plate || ''; e.driver = u.driver || ''; e.dni = u.dni || ''; e.company = u.company || '';
+  persist(e);
+}
+const clearUnit = e => { e.plate = ''; e.driver = ''; e.dni = ''; e.company = ''; };
+function undoOut(e){ e.exited = false; e.salidaAt = null; e.opOut = ''; clearUnit(e); persist(e); }
+function undoIn(e){ e.found = false; e.exited = false; e.ingresoAt = null; e.salidaAt = null; e.opIn = ''; e.opOut = ''; clearUnit(e); persist(e); }
 
 /* Modelo del celular (no hay forma de leer el nombre del dueño desde un navegador) */
 async function detectDevice(){
@@ -1256,7 +1491,8 @@ function trackCells(e, t){
   return {
     inD: sIn != null ? Math.floor(sIn) : '',  inT: sIn != null ? +(sIn - Math.floor(sIn)).toFixed(8) : '',  opIn: e.opIn || '',
     outD: sOut != null ? Math.floor(sOut) : '', outT: sOut != null ? +(sOut - Math.floor(sOut)).toFixed(8) : '', opOut: e.opOut || '',
-    days: sIn != null ? `=IF(${L('inD')}="","",IF(${L('outD')}="",TODAY(),INT(${L('outD')}))-INT(${L('inD')})+1)` : ''
+    days: sIn != null ? `=IF(${L('inD')}="","",IF(${L('outD')}="",TODAY(),INT(${L('outD')}))-INT(${L('inD')})+1)` : '',
+    plate: e.exited ? (e.plate || '') : '', driver: e.exited ? (e.driver || '') : '', dni: e.exited ? (e.dni || '') : '', company: e.exited ? (e.company || '') : ''
   };
 }
 function queueOp(e){
@@ -1336,7 +1572,17 @@ function renderMode(){
   document.querySelectorAll('.modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
   const b = $('#btnScan'); b.className = 'scan ' + m;
   b.textContent = m === 'out' ? '📷 Escanear SALIDA' : '📷 Escanear INGRESO';
-  $('#scLbl').textContent = m === 'out' ? 'SALIDA · apunta al código de barras del VIN' : 'INGRESO · apunta al código de barras del VIN';
+  $('#scLbl').textContent = m === 'out' ? `SALIDA${S.unit ? ' · 🚛 ' + S.unit.plate : ''} · apunta al código del VIN` : 'INGRESO · apunta al código de barras del VIN';
+  // barra de la unidad de transporte (solo en SALIDA)
+  const ub = $('#unitBar'); ub.classList.toggle('hidden', m !== 'out'); ub.classList.toggle('set', !!S.unit);
+  if(m === 'out'){
+    const today = dayOnly(new Date());
+    const n = S.unit ? S.entries.filter(e => e.exited && e.salidaAt >= today && normPlate(e.plate) === normPlate(S.unit.plate)).length : 0;
+    ub.innerHTML = S.unit
+      ? `<span style="font-size:24px">🚛</span><div class="grow"><div class="pl">${esc(S.unit.plate)}</div>
+         <div class="meta">${esc(S.unit.driver)} · ${esc(shortCo(S.unit.company) || '—')} · ${n} cargado(s) hoy</div></div><span class="chg">Cambiar</span>`
+      : `<span style="font-size:24px">🚛</span><div class="grow"><b>Elegir cigüeña o camabaja</b><div class="meta">Placa y conductor de la unidad que se lleva los vehículos</div></div>`;
+  }
 }
 function renderAll(){
   const V = S.entries.filter(inView);
@@ -1375,7 +1621,7 @@ function renderList(){
     if(S.tab === 'out') items.sort((a, b) => (b.salidaAt || 0) - (a.salidaAt || 0));
     html = items.slice(0, LIMIT).map(e => {
       let cls = '', meta = esc(e.brand + ' · ' + e.model + ' · ' + e.color) + (many ? ' · 📄 ' + esc(shortName(e.fileName)) : ''), badge = `<span class="badge">F${e.row}</span>`;
-      if(e.exited){ cls = 'exited'; meta = `Salió ${shortDT(e.salidaAt) || '—'} · ${custody(e) ?? '—'} día(s) · ${meta}`; badge = `<span class="badge out">${custody(e) ?? '—'} d</span>`; }
+      if(e.exited){ cls = 'exited'; meta = `Salió ${shortDT(e.salidaAt) || '—'}${e.plate ? ' · 🚛 ' + esc(e.plate) : ''} · ${custody(e) ?? '—'} día(s) · ${meta}`; badge = `<span class="badge out">${custody(e) ?? '—'} d</span>`; }
       else if(e.found){
         const d = custody(e), late = isLate(e);
         cls = late ? 'late' : 'found';
@@ -1495,11 +1741,14 @@ function timesHtml(e){
     ${due && !e.exited ? `<dt>Vence custodia</dt><dd>${fmtD(due)}</dd>` : ''}
     ${e.opIn ? `<dt>Recibió</dt><dd>${esc(e.opIn)}</dd>` : ''}
     ${e.exited && e.opOut ? `<dt>Despachó</dt><dd>${esc(e.opOut)}</dd>` : ''}
+    ${e.exited && (e.plate || e.driver) ? `<dt>Unidad</dt><dd>🚛 ${esc(e.plate || '—')}</dd><dt>Conductor</dt><dd>${esc(e.driver || '—')}${e.dni ? ' · DNI ' + esc(e.dni) : ''}</dd>
+      ${e.company ? `<dt>Transportista</dt><dd>${esc(shortCo(e.company))}</dd>` : ''}` : ''}
   </dl>`;
 }
 
 function handleRead(raw, source){
   if(!checkSession()) return { kind: 'none' };
+  if(needUnit(() => handleRead(raw, source))) return { kind: 'none' };
   const r = lookup(raw, source);
   if(r.kind === 'none') return r;
   if(r.kind === 'notvin') return r;
@@ -1780,6 +2029,7 @@ const Scan = {
 $('#btnScan').onclick = () => {
   beep('none');
   if(!checkSession()) return;
+  if(needUnit(() => Scan.open())) return;
   if(S.mode === 'local' && !cfg.operator && !cfg.askedOp) askOperator(() => Scan.open()); else Scan.open();
 };
 $('#scClose').onclick = $('#scDone').onclick = () => Scan.close();
@@ -1817,13 +2067,60 @@ $('#setupForm').onsubmit = async ev => {
   try{
     await loadAppConfig();
     if(Auth.conf && Auth.conf.users.length) return showLogin('Ya existe un administrador. Inicia sesión.');
-    const admin = await makeUser(name, user, p, 'admin');
+    if(!validMail($('#suMail').value)) return $('#suMsg').textContent = 'Escribe un correo válido.';
+    const admin = await makeUser(name, user, p, 'admin', $('#suMail').value);
     await saveAppConfig(c => { c.users = [admin]; c.settings = { custodyDays: +cfg.custodyDays || 0, color: cfg.color, colorOut: cfg.colorOut }; });
-    Auth.session = { id: admin.id, user: admin.user, name: admin.name, role: 'admin', rev: 0, at: Date.now() };
+    Auth.session = { id: admin.id, user: admin.user, name: admin.name, role: effRole(admin), rev: 0, at: Date.now() };
     store.set('vin_session', Auth.session);
     toast('✅ Administrador creado'); await enterApp();
   } catch(e){ $('#suMsg').textContent = e.message; }
 };
+// ---- cigüeñas / camabajas: búsqueda, "Otra…" razón social, ingreso manual y alta en el listado ----
+document.addEventListener('input', ev => { if(ev.target.id === 'unitQ') renderUnitList(ev.target.value); });
+document.addEventListener('change', ev => {
+  const m = { umCo: 'umCoOther', uaCo: 'uaCoOther' }[ev.target.id];
+  if(m){ const o = $('#' + m); o.classList.toggle('hidden', ev.target.value !== '__otra'); if(ev.target.value === '__otra') o.focus(); }
+});
+const coVal = (sel, other) => $(sel).value === '__otra' ? $(other).value.trim().toUpperCase() : $(sel).value;
+document.addEventListener('submit', async ev => {
+  const id = ev.target.id;
+  if(id === 'recForm1' || id === 'recForm2'){
+    ev.preventDefault();
+    const btn = $(id === 'recForm1' ? '#rcBtn1' : '#rcBtn2'), txt = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Un momento…'; $('#rcMsg').textContent = '';
+    try{
+      if(id === 'recForm1'){ const u = await sendRecovery($('#rcUser').value); openRecovery(2, u.id, u.email); }
+      else {
+        const p = $('#rcPass').value;
+        if(p.length < 6) throw new Error('La clave debe tener al menos 6 caracteres.');
+        if(p !== $('#rcPass2').value) throw new Error('Las claves no coinciden.');
+        const u = await confirmRecovery(ev.target.dataset.uid, $('#rcCode').value, p);
+        closeSheet(); showLogin(''); $('#lgUser').value = u.user; toast('✅ Clave cambiada. Ya puedes entrar.', 4000);
+      }
+    } catch(e){ $('#rcMsg').textContent = e.message; }
+    finally{ btn.disabled = false; btn.textContent = txt; }
+    return;
+  }
+  if(id === 'unitManual'){
+    ev.preventDefault();
+    const u = { plate: $('#umPlate').value.trim().toUpperCase(), driver: $('#umDriver').value.trim().toUpperCase(), dni: $('#umDni').value.trim(), company: coVal('#umCo', '#umCoOther') };
+    if(!u.plate || !u.driver) return toast('Escribe placa y conductor');
+    if($('#umSave')?.checked){
+      try{ await appendUnit({ name: u.driver, dni: u.dni, cargo: 'CONDUCTOR', plate: u.plate, company: u.company }); toast('✅ Agregado al listado'); }
+      catch(e){ toast('⚠ No se pudo agregar al listado: ' + e.message, 5000); }
+    }
+    finishUnit(u);
+  }
+  if(id === 'unitAddForm'){
+    ev.preventDefault();
+    const rec = { name: $('#uaName').value.trim().toUpperCase(), dni: $('#uaDni').value.trim(), cargo: $('#uaCargo').value, plate: $('#uaPlate').value.trim().toUpperCase() || '-',
+      tipo: $('#uaTipo').value, company: coVal('#uaCo', '#uaCoOther'), lic: $('#uaLic').value.trim().toUpperCase() || '-', cat: $('#uaCat').value.trim().toUpperCase() || '-' };
+    if(!rec.name) return toast('Escribe apellidos y nombres');
+    if(rec.dni && S.units.some(x => x.dni === rec.dni)) return toast('Ya existe una persona con ese DNI en el listado');
+    try{ await appendUnit(rec); toast('✅ Agregado al listado'); openUnitPicker(S.unitThen); }
+    catch(e){ toast('⚠ ' + e.message, 5000); }
+  }
+});
 // formulario "Nuevo usuario" (está dentro del panel, por eso se escucha en el documento)
 document.addEventListener('submit', async ev => {
   if(ev.target.id !== 'newUserForm') return;
@@ -1834,8 +2131,11 @@ document.addEventListener('submit', async ev => {
   if(p.length < 6) return toast('La clave debe tener al menos 6 caracteres');
   if(role === 'admin' && !isSuper()) return toast('Solo el super-administrador crea administradores');
   if(user === normUser(CONFIG.superAdmin)) return toast('Ese nombre de usuario está reservado');
+  const mail = $('#nuMail').value.trim();
+  if(role === 'admin' && !validMail(mail)) return toast('Los administradores necesitan un correo válido');
+  if(mail && !validMail(mail)) return toast('El correo no es válido');
   try{
-    const nu = await makeUser(name, user, p, role);
+    const nu = await makeUser(name, user, p, role, mail);
     await saveAppConfig(c => { if(c.users.some(x => x.user === nu.user)) return `El usuario “${nu.user}” ya existe.`; c.users.push(nu); });
     toast(`✅ Usuario ${nu.user} creado`); openUsers();
   } catch(e){ toast('⚠ ' + e.message, 5000); }
@@ -1846,14 +2146,17 @@ $('#fileLocal').onchange = ev => { const fl = [...ev.target.files]; ev.target.va
 $('#fileUpload').onchange = ev => { const f = ev.target.files[0]; ev.target.value = ''; if(f){ closeSheet(); uploadManifest(f); } };
 $('#sheet').onclick = ev => { if(ev.target.id === 'sheet') closeSheet(); };
 document.addEventListener('click', async ev => {
-  const t = ev.target.closest('[data-act],[data-pick],[data-do],[data-hist],[data-mode],[data-ua]'); if(!t) return;
+  const t = ev.target.closest('[data-act],[data-pick],[data-do],[data-hist],[data-mode],[data-ua],[data-unit]'); if(!t) return;
   if(t.dataset.mode){ cfg.scanMode = t.dataset.mode; store.set('vin_cfg', cfg); $('#result').classList.add('hidden'); renderMode(); toast(t.dataset.mode === 'out' ? '⬆ Modo SALIDA' : '⬇ Modo INGRESO'); return; }
   if(t.dataset.pick){ closeSheet(); pick(t.dataset.pick); return; }
   if(t.dataset.ua){ await userAction(t.dataset.ua, t.dataset.uid); return; }
+  if(t.dataset.unit){ pickUnitFromList(t.dataset.unit); return; }
   if(t.dataset.do){
     if(!checkSession()) return;
     const e = S.entries.find(x => x.id === t.dataset.id); closeSheet(); if(!e) return;
     const d = t.dataset.do;
+    // toda salida necesita la cigüeña / camabaja
+    if((d === 'out' || d === 'forceout') && !S.unit){ const el = t; openUnitPicker(() => el.click()); return; }
     if(d === 'in'){ doIn(e); renderResult({ kind:'ok', vin: e.vin, list:[e] }); feedback('ok'); }
     else if(d === 'out'){ doOut(e); renderResult({ kind:'out', vin: e.vin, list:[e] }); feedback('out'); }
     else if(d === 'forceout'){ e.ingresoAt = null; doOut(e); renderResult({ kind:'out', vin: e.vin, list:[e] }); feedback('out'); }
@@ -1866,6 +2169,17 @@ document.addEventListener('click', async ev => {
   if(a === 'close') closeSheet();
   else if(a === 'upload'){ if(isAdmin()) $('#fileUpload').click(); else toast('Solo el administrador puede subir manifiestos'); }
   else if(a === 'users'){ openUsers(); }
+  else if(a === 'recover'){ openRecovery(1); }
+  else if(a === 'mymail'){
+    const m = prompt('Tu correo de recuperación:', sessionUser()?.email || ''); if(m == null) return;
+    if(!validMail(m)) return toast('El correo no es válido');
+    const me = Auth.session.id;
+    try{ await saveAppConfig(c => { const x = c.users.find(y => y.id === me); if(!x) return 'Usuario no encontrado'; x.email = m.trim().toLowerCase(); }); toast('✅ Correo guardado'); openUserMenu(); }
+    catch(e){ toast('⚠ ' + e.message, 5000); }
+  }
+  else if(a === 'unitpick'){ openUnitPicker(); }
+  else if(a === 'unitclear'){ setUnit(null); closeSheet(); }
+  else if(a === 'unitadd'){ openUnitAdd(); }
   else if(a === 'applogout'){ closeSheet(); logoutApp(); }
   else if(a === 'mypass'){
     const p = prompt('Nueva clave (mínimo 6 caracteres):'); if(p == null) return;
