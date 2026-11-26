@@ -59,9 +59,16 @@ p.muted,.muted{color:var(--muted);font-size:14px}
 .vin b.diff{color:var(--bad);text-decoration:underline}
 dl.fields{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:10px 0 0;font-size:14px}
 dl.fields dt{color:var(--muted)} dl.fields dd{margin:0;word-break:break-word}
-.tabs{display:flex;gap:6px;margin:4px 0 10px;overflow-x:auto}
-.tabs button{flex:1;white-space:nowrap;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:9px 8px;font-size:14px;font-weight:600}
-.tabs button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+/* 5 pestañas iguales que siempre caben en el ancho del celular */
+.tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;margin:4px 0 10px}
+.tabs button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:0;border:1px solid var(--line);background:var(--card);
+  border-radius:12px;padding:8px 2px;font-weight:600;line-height:1.1}
+.tabs button b{font-size:19px;font-weight:800}
+.tabs button span{font-size:11px;color:var(--muted);text-align:center;white-space:normal;overflow-wrap:anywhere}
+.tabs button.t-in b{color:var(--in)} .tabs button.t-out b{color:var(--blue)} .tabs button.t-bad b{color:var(--bad)}
+.tabs button.on{background:var(--ink);border-color:var(--ink)}
+.tabs button.on b,.tabs button.on span{color:var(--bg)}
+@media (min-width:520px){ .tabs button span{font-size:13px} .tabs button b{font-size:21px} }
 input.filter,select.filter{width:100%;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px 12px;margin-bottom:10px}
 ul.list{list-style:none;margin:0;padding:0}
 ul.list li{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px}
@@ -240,11 +247,11 @@ input.t{width:100%;border:1px solid var(--line);background:var(--card);border-ra
     </form>
     <div id="result" class="card result hidden"></div>
     <div class="tabs">
-      <button data-tab="pend" class="on">Por llegar <span id="nPend"></span></button>
-      <button data-tab="in">En almacén <span id="nIn"></span></button>
-      <button data-tab="out">Salieron <span id="nOut"></span></button>
-      <button data-tab="extra">No listados <span id="nExtra"></span></button>
-      <button data-tab="sum">📊 Resumen</button>
+      <button data-tab="pend" class="on"><b id="nPend">0</b><span>Por llegar</span></button>
+      <button data-tab="in" class="t-in"><b id="nIn">0</b><span>En almacén</span></button>
+      <button data-tab="out" class="t-out"><b id="nOut">0</b><span>Salieron</span></button>
+      <button data-tab="extra" class="t-bad"><b id="nExtra">0</b><span>No listados</span></button>
+      <button data-tab="sum"><b>📊</b><span>Resumen</span></button>
     </div>
     <div id="summary" class="hidden"></div>
     <input id="filter" class="filter" placeholder="Filtrar lista…" autocomplete="off">
@@ -285,6 +292,7 @@ const CONFIG = {
   folder: 'https://supervanperu-my.sharepoint.com/personal/supervisor_dief_pe/Documents/Respaldo de Balanza 2025/Vehiculos',
   historyFolder: 'Historial',
   loginHint: 'escaner.vin@dief.pe',   // cuenta que se propone al iniciar sesión
+  superAdmin: 'eliopetit',            // super-administrador: puede todo y nadie puede eliminarlo ni desactivarlo
   custodyDays: 0,                     // días de custodia contratados (0 = sin alerta); el administrador lo cambia en Ajustes
   allowLocalMode: false,              // "Abrir Excel desde este teléfono" (sin usuarios): desactivado para que todos pasen por el login
   pollSeconds: 45
@@ -819,7 +827,20 @@ async function uploadManifest(file){
    ===================================================================== */
 const CFG_FILE = 'vin-config.json';
 const Auth = { conf: null, eTag: null, cTag: null, session: store.get('vin_session', null), polling: false };
-const isAdmin = () => S.mode !== 'graph' || Auth.session?.role === 'admin';
+/* Roles: 'super' (eliopetit, fijo en el código) > 'admin' > 'user' (operario) */
+const effRole = u => normUser(u.user) === normUser(CONFIG.superAdmin) ? 'super' : (u.role === 'super' ? 'admin' : u.role);
+const isAdmin = () => S.mode !== 'graph' || ['admin', 'super'].includes(Auth.session?.role);
+const isSuper = () => S.mode !== 'graph' || Auth.session?.role === 'super';
+const ROLE_LABEL = { super: '⭐ Super-admin', admin: 'Administrador', user: 'Operario' };
+const roleBadge = r => r === 'super' ? '<span class="badge adm-b">⭐ Super-admin</span>' : r === 'admin' ? '<span class="badge adm-b">Admin</span>' : '<span class="badge">Operario</span>';
+/* ¿puede el usuario actual administrar a "u"? (el super a todos menos a sí mismo; un admin solo a operarios) */
+function canManage(u){
+  const me = Auth.session; if(!me || u.id === me.id) return false;
+  const r = effRole(u);
+  if(r === 'super') return false;
+  if(r === 'admin') return me.role === 'super';
+  return me.role === 'super' || me.role === 'admin';
+}
 const rndHex = n => [...crypto.getRandomValues(new Uint8Array(n))].map(b => b.toString(16).padStart(2, '0')).join('');
 async function hashPass(pass, salt){
   const enc = new TextEncoder();
@@ -879,7 +900,7 @@ function sessionUser(){ const s = Auth.session; return s && Auth.conf ? Auth.con
 function sessionValid(){
   if(S.mode !== 'graph') return true;
   const u = sessionUser();
-  return !!(u && u.active && (u.rev || 0) === Auth.session.rev);
+  return !!(u && (u.active || effRole(u) === 'super') && (u.rev || 0) === Auth.session.rev);
 }
 /* revisa la sesión con la última lista de usuarios; si ya no es válida, saca al usuario */
 function checkSession(){
@@ -890,7 +911,7 @@ function checkSession(){
     return false;
   }
   const u = sessionUser();   // el administrador pudo cambiarle el nombre o el rol
-  if(u.name !== Auth.session.name || u.role !== Auth.session.role){ Auth.session.name = u.name; Auth.session.role = u.role; store.set('vin_session', Auth.session); renderUser(); }
+  if(u.name !== Auth.session.name || effRole(u) !== Auth.session.role){ Auth.session.name = u.name; Auth.session.role = effRole(u); store.set('vin_session', Auth.session); renderUser(); }
   return true;
 }
 function renderUser(){
@@ -921,10 +942,15 @@ async function doLogin(user, pass){
     const n = lock.n + 1; store.set('vin_lock', { n: n >= 5 ? 0 : n, until: n >= 5 ? Date.now() + 60000 : 0 });
     throw new Error(n >= 5 ? 'Demasiados intentos. Espera 1 minuto.' : 'Usuario o clave incorrectos.');
   }
-  if(!u.active) throw new Error('Tu usuario está desactivado. Consulta al administrador.');
+  const role = effRole(u);
+  if(!u.active && role !== 'super') throw new Error('Tu usuario está desactivado. Consulta al administrador.');
   store.set('vin_lock', { n: 0, until: 0 });
-  Auth.session = { id: u.id, user: u.user, name: u.name, role: u.role, rev: u.rev || 0, at: Date.now() };
+  Auth.session = { id: u.id, user: u.user, name: u.name, role, rev: u.rev || 0, at: Date.now() };
   store.set('vin_session', Auth.session);
+  // el super-administrador siempre queda activo y marcado como tal en la lista
+  if(role === 'super' && (u.role !== 'super' || !u.active)){
+    try{ await saveAppConfig(c => { const x = c.users.find(y => y.id === u.id); if(x){ x.role = 'super'; x.active = true; } }); } catch{}
+  }
   renderUser();
   await enterApp();
 }
@@ -944,56 +970,63 @@ function logoutApp(){ if(confirm('¿Cerrar tu sesión en este celular?')) kick('
 function openUserMenu(){
   const s = Auth.session; if(!s) return;
   openSheet(`<h3>${esc(s.name)} <button data-act="close">✕</button></h3>
-    <p class="muted">Usuario <b>${esc(s.user)}</b> · ${s.role === 'admin' ? '<span class="badge adm-b">Administrador</span>' : '<span class="badge">Operario</span>'}</p>
-    ${s.role === 'admin' ? '<button class="btn primary" data-act="users">👥 Administrar usuarios</button>' : ''}
+    <p class="muted">Usuario <b>${esc(s.user)}</b> · ${roleBadge(s.role)}</p>
+    ${s.role === 'super' ? '<p class="muted">Tienes todos los privilegios: administras usuarios y administradores. Nadie puede eliminarte ni desactivarte.</p>' : ''}
+    ${isAdmin() ? '<button class="btn primary" data-act="users">👥 Administrar usuarios</button>' : ''}
     <button class="btn" data-act="mypass">🔑 Cambiar mi clave</button>
     <button class="btn danger" data-act="applogout">Cerrar sesión</button>`);
 }
 function openUsers(){
   if(!isAdmin()) return;
-  const us = (Auth.conf?.users || []).slice().sort((a, b) => (b.active - a.active) || a.name.localeCompare(b.name));
-  const me = Auth.session.id;
+  const rank = { super: 0, admin: 1, user: 2 };
+  const us = (Auth.conf?.users || []).slice().sort((a, b) => (rank[effRole(a)] - rank[effRole(b)]) || (b.active - a.active) || a.name.localeCompare(b.name));
+  const me = Auth.session.id, sup = isSuper();
   openSheet(`<h3>Usuarios <button data-act="close">✕</button></h3>
-    <p class="muted">Los cambios llegan a los celulares en menos de 1 minuto. Desactivar o cerrar la sesión saca al usuario de la app.</p>
-    <ul class="list users">${us.map(u => `<li>
+    <p class="muted">Los cambios llegan a los celulares en menos de 1 minuto. Desactivar o cerrar la sesión saca al usuario de la app.
+      ${sup ? '' : 'Como administrador gestionas a los operarios; los administradores los gestiona el super-administrador.'}</p>
+    <ul class="list users">${us.map(u => { const r = effRole(u), can = canManage(u); return `<li>
       <div class="grow"><div style="font-weight:700">${esc(u.name)} ${u.id === me ? '<span class="muted">(tú)</span>' : ''}</div>
         <div class="meta">${esc(u.user)}</div></div>
-      ${u.role === 'admin' ? '<span class="badge adm-b">Admin</span>' : '<span class="badge">Operario</span>'}
-      ${u.active ? '<span class="badge ok">Activo</span>' : '<span class="badge off">Desactivado</span>'}
-      <div class="acts">${u.id === me ? '' : `
+      ${roleBadge(r)}
+      ${u.active || r === 'super' ? '<span class="badge ok">Activo</span>' : '<span class="badge off">Desactivado</span>'}
+      <div class="acts">${can ? `
         <button class="btn sm" data-ua="toggle" data-uid="${u.id}">${u.active ? '⛔ Desactivar' : '✅ Activar'}</button>
         ${u.active ? `<button class="btn sm" data-ua="kick" data-uid="${u.id}">🚪 Cerrar sesión</button>` : ''}
-        <button class="btn sm" data-ua="role" data-uid="${u.id}">${u.role === 'admin' ? 'Hacer operario' : 'Hacer admin'}</button>`}
+        ${sup ? `<button class="btn sm" data-ua="role" data-uid="${u.id}">${r === 'admin' ? 'Hacer operario' : 'Hacer admin'}</button>` : ''}
         <button class="btn sm" data-ua="pass" data-uid="${u.id}">🔑 Clave</button>
-        ${u.id === me ? '' : `<button class="btn sm danger" data-ua="del" data-uid="${u.id}">Eliminar</button>`}</div>
-    </li>`).join('')}</ul>
+        <button class="btn sm danger" data-ua="del" data-uid="${u.id}">Eliminar</button>` : (r === 'super' && u.id !== me ? '<span class="muted" style="font-size:13px">🔒 Protegido</span>' : '')}</div>
+    </li>`; }).join('')}</ul>
     <div class="sec">Nuevo usuario</div>
     <form id="newUserForm" autocomplete="off">
       <label class="f">Nombre y apellido</label><input class="t" id="nuName" required>
       <label class="f">Usuario (para entrar)</label><input class="t" id="nuUser" autocapitalize="none" spellcheck="false" required placeholder="ej.: jperez">
       <label class="f">Clave inicial (mínimo 6)</label><input class="t" id="nuPass" type="text" autocomplete="off" required>
       <label class="f">Rol</label>
-      <select class="filter" id="nuRole"><option value="user">Operario (escanea ingresos y salidas)</option><option value="admin">Administrador (todo)</option></select>
+      <select class="filter" id="nuRole"><option value="user">Operario (escanea ingresos y salidas)</option>${sup ? '<option value="admin">Administrador (sube, archiva y gestiona operarios)</option>' : ''}</select>
       <button class="btn primary" type="submit">➕ Crear usuario</button>
     </form>`);
 }
 async function userAction(act, uid){
   const u = Auth.conf.users.find(x => x.id === uid); if(!u) return;
-  const lastAdmin = c => c.users.filter(x => x.role === 'admin' && x.active).length <= 1;
+  // la regla se vuelve a revisar con la versión más reciente de la lista (otro admin pudo cambiarla)
+  const guard = (c, x) => !x ? 'El usuario ya no existe.' : !canManage(x) ? 'No tienes permiso para modificar a este usuario.' : null;
+  // si por algún motivo no existe el super-administrador, siempre debe quedar un administrador activo
+  const noSuper = c => !c.users.some(x => effRole(x) === 'super');
+  const lastAdmin = c => noSuper(c) && c.users.filter(x => effRole(x) === 'admin' && x.active).length <= 1;
   try{
-    if(act === 'toggle') await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); if(x.active && x.role === 'admin' && lastAdmin(c)) return 'Debe quedar al menos un administrador activo.'; x.active = !x.active; x.rev = (x.rev || 0) + 1; });
-    else if(act === 'kick') await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); x.rev = (x.rev || 0) + 1; });
-    else if(act === 'role') await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); if(x.role === 'admin' && lastAdmin(c)) return 'Debe quedar al menos un administrador activo.'; x.role = x.role === 'admin' ? 'user' : 'admin'; });
+    if(act === 'toggle') await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); const g = guard(c, x); if(g) return g; if(x.active && effRole(x) === 'admin' && lastAdmin(c)) return 'Debe quedar al menos un administrador activo.'; x.active = !x.active; x.rev = (x.rev || 0) + 1; });
+    else if(act === 'kick') await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); const g = guard(c, x); if(g) return g; x.rev = (x.rev || 0) + 1; });
+    else if(act === 'role') await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); const g = guard(c, x); if(g) return g; if(!isSuper()) return 'Solo el super-administrador cambia roles.'; if(effRole(x) === 'admin' && lastAdmin(c)) return 'Debe quedar al menos un administrador activo.'; x.role = effRole(x) === 'admin' ? 'user' : 'admin'; x.rev = (x.rev || 0) + 1; });
     else if(act === 'del'){
       if(!confirm(`¿Eliminar a ${u.name}? Ya no podrá entrar. (Sus registros en el Excel se conservan.)`)) return;
-      await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); if(x.role === 'admin' && lastAdmin(c)) return 'Debe quedar al menos un administrador activo.'; c.users = c.users.filter(y => y.id !== uid); });
+      await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); const g = guard(c, x); if(g) return g; if(effRole(x) === 'admin' && lastAdmin(c)) return 'Debe quedar al menos un administrador activo.'; c.users = c.users.filter(y => y.id !== uid); });
     }
     else if(act === 'pass'){
       const p = prompt(`Nueva clave para ${u.name} (mínimo 6 caracteres):`); if(p == null) return;
       if(p.length < 6) return toast('La clave debe tener al menos 6 caracteres');
       const salt = rndHex(16), hash = await hashPass(p, salt);
       // cambiar la clave de otro también cierra su sesión actual
-      await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); x.salt = salt; x.hash = hash; if(uid !== Auth.session.id) x.rev = (x.rev || 0) + 1; });
+      await saveAppConfig(c => { const x = c.users.find(y => y.id === uid); if(!x) return 'El usuario ya no existe.'; if(uid !== Auth.session.id){ const g = guard(c, x); if(g) return g; } x.salt = salt; x.hash = hash; if(uid !== Auth.session.id) x.rev = (x.rev || 0) + 1; });
     }
     toast('✅ Guardado'); openUsers();
   } catch(e){ toast('⚠ ' + e.message, 5000); }
@@ -1316,7 +1349,7 @@ function renderAll(){
   $('#cSub').innerHTML = tot ? `${tot} vehículos · ${((nIn + nOut) / tot * 100).toFixed(0)}% ingresados` +
     (+cfg.custodyDays ? ` · custodia ${+cfg.custodyDays} días` + (late ? ` · <b style="color:var(--bad)">⚠ ${late} vencido(s)</b>` : '') : '') +
     (S.queue.length ? ` · ${S.queue.length} por guardar` : '') : '';
-  $('#nPend').textContent = '(' + pend + ')'; $('#nIn').textContent = '(' + nIn + ')'; $('#nOut').textContent = '(' + nOut + ')'; $('#nExtra').textContent = '(' + S.extras.length + ')';
+  $('#nPend').textContent = pend; $('#nIn').textContent = nIn; $('#nOut').textContent = nOut; $('#nExtra').textContent = S.extras.length;
   renderMode();
   renderList();
 }
@@ -1799,6 +1832,8 @@ document.addEventListener('submit', async ev => {
   const name = $('#nuName').value.trim(), user = normUser($('#nuUser').value), p = $('#nuPass').value, role = $('#nuRole').value;
   if(!name || !user) return toast('Completa nombre y usuario');
   if(p.length < 6) return toast('La clave debe tener al menos 6 caracteres');
+  if(role === 'admin' && !isSuper()) return toast('Solo el super-administrador crea administradores');
+  if(user === normUser(CONFIG.superAdmin)) return toast('Ese nombre de usuario está reservado');
   try{
     const nu = await makeUser(name, user, p, role);
     await saveAppConfig(c => { if(c.users.some(x => x.user === nu.user)) return `El usuario “${nu.user}” ya existe.`; c.users.push(nu); });
